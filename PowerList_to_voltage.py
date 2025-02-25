@@ -160,8 +160,6 @@ def charge_calibration(path=calibration_file,
                  
     return calibrations, fiber_to_mea_red
 
-
-
 def get_voltages(Ptot, calibration, all_LEDs = ['Violet', 'Blue', 'Green', 'Yellow', 'Red']):
     voltages = calibration['voltages']
     driving_tension = []
@@ -203,10 +201,27 @@ def get_voltages(Ptot, calibration, all_LEDs = ['Violet', 'Blue', 'Green', 'Yell
     return driving_tension
 
 
+
 ledDATA_path = './IlluminationData.pkl'
 
 
 if __name__ == '__main__':
+    
+    
+    # Create the root window (it won't be shown)
+    root = tk.Tk()
+    root.withdraw()  # Hide the root window
+
+    print('Select a PowerList file...')
+    # Open the file dialog
+    powerlist_file = filedialog.askopenfilename(title="Select a PowerList file")
+
+    # Print the selected file path
+    print("Selected file:", powerlist_file)
+
+    root.quit()
+    
+    
     
     # Create the root window (it won't be shown)
     root = tk.Tk()
@@ -259,26 +274,22 @@ if __name__ == '__main__':
         except ValueError:
             print("Invalid input. Please enter numbers separated by valid delimiters.")
         
-    
-    opsins = ['Scones', 'Mcones', 'Rods', 'Mela']
-    isomerisation_target = {}
-    
-    for opsin in opsins:
-        try :
-            isomerisation = float(input(f"Target Isomerisation for {opsin} (if not a number, opsin is ignored) : "))
-            isomerisation_target[opsin] = int(isomerisation)
-        except:
-            print(f"{opsin} is ignored !")
-    print("Best Solution found:")
-    Ptot_solution = get_mix_color(isomerisation_target, selected_LEDs = selected_leds, ledDATA_path = ledDATA_path)
-    print("\n\n\n\n---------------Summary---------------")
+        
+    output_file_path = powerlist_file.replace('PowerList', '')  # Remove 'PowerList' if it exists
+    output_file_path = output_file_path.split('.')[0] + 'VoltageList.txt'  # Add '_VoltageList' before the file extension
 
-    
-    plot_isomerisations([Ptot_solution], selected_LEDs = selected_leds, ledDATA_path = ledDATA_path)
-    plt.show(block=False)
-    print('\nLEDs Voltages')
-    get_voltages(Ptot_solution, calibration, selected_leds )
-    print("-------------------------------------\n\n")
+    with open(powerlist_file, 'r') as file, open(output_file_path, 'w') as output_file:
+        for line in file:
+            Ptot = list(map(int, line.split()))
+
+            # Ensure that the number of columns in the line matches the number of selected LEDs
+            assert len(Ptot) == len(selected_leds), f"Mismatch: {len(Ptot)} columns in file, but {len(selected_leds)} LEDs selected."
+
+            voltage = get_voltages(Ptot, calibration, selected_leds)  
+            
+            # Write the calculated voltages to the output file in the same format
+            output_file.write('\t'.join(map(str, voltage)) + '\n')
+   
     input('\nPress enter to finish')
     
            
