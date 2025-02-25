@@ -56,7 +56,7 @@ pip install -r requirements.txt
 
 ## 🏗️ Building the Executable
 
-To package the script into a standalone executable, run the following command:
+To package the script into a standalone executable, run the following command in your folder with active env:
 
 ```bash
 pyinstaller --onefile --console --distpath . \
