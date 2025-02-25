@@ -1,0 +1,11 @@
+openpyxl
+numpy
+matplotlib
+tqdm
+tkinter
+pickle
+itertools
+plotly
+Pillow
+scipy
+pyinstaller
