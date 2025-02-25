@@ -66,6 +66,16 @@ pyinstaller --onefile --console --distpath . \
   Isomerisation_to_voltage.py
 ```
 
+Same for PowerList_to_voltage
+
+```bash
+pyinstaller --onefile --console --distpath . \
+  --add-data "PhotoReceptorData.pkl;." \
+  --add-data "IlluminationData.pkl;." \
+  --add-data "colors_utils.py;." \
+  PowerList_to_voltage.py
+```
+
 ### 🔧 Explanation of Parameters:
 - `--onefile`: Bundles everything into a single executable.
 - `--console`: Ensures a console appears when the program runs.
