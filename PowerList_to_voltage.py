@@ -171,7 +171,6 @@ def get_voltages(Ptot, calibration, all_LEDs = ['Violet', 'Blue', 'Green', 'Yell
         # Return 0 voltage if the power is 0
         if temp_P == 0:
             driving_tension.append(0)
-            print(f"{col_name}: Power is 0, so voltage is 0 V.")
             continue
         
         calibration_list = calibration[col_name]
@@ -194,8 +193,6 @@ def get_voltages(Ptot, calibration, all_LEDs = ['Violet', 'Blue', 'Green', 'Yell
             
             res_voltage = voltages[low_ind] + (voltages[high_ind] - voltages[low_ind]) * (temp_P - calibration_list[low_ind]) / (calibration_list[high_ind] - calibration_list[low_ind])
             driving_tension.append(res_voltage)
-
-            print(f'{col_name}: {res_voltage} V')
             
     driving_tension = np.array(driving_tension)
     return driving_tension
@@ -236,7 +233,7 @@ if __name__ == '__main__':
 
     root.quit()
 
-    calibration, _ = charge_calibration(path = file_path, verbose=True)
+    calibration, _ = charge_calibration(path = file_path, verbose=False)
     
     all_leds = list(load_obj(ledDATA_path).keys())
 
@@ -267,7 +264,7 @@ if __name__ == '__main__':
             selected_leds = [all_leds[i-1] for i in choices if 1 <= i <= len(all_leds)]
 
             if selected_leds:
-                print(f"You selected: {', '.join(selected_leds)}")
+                print(f"\nYou selected: {', '.join(selected_leds)}")
                 break
             else:
                 print("Invalid selection, try again.")
@@ -278,6 +275,7 @@ if __name__ == '__main__':
     output_file_path = powerlist_file.replace('PowerList', '')  # Remove 'PowerList' if it exists
     output_file_path = output_file_path.split('.')[0] + 'VoltageList.txt'  # Add '_VoltageList' before the file extension
 
+    tot = 0
     with open(powerlist_file, 'r') as file, open(output_file_path, 'w') as output_file:
         for line in file:
             Ptot = list(map(int, line.split()))
@@ -289,7 +287,9 @@ if __name__ == '__main__':
             
             # Write the calculated voltages to the output file in the same format
             output_file.write('\t'.join(map(str, voltage)) + '\n')
-   
+            tot += 1
+
+    print(f"\nOutput file contains   {tot} colors   and saved at :\n{os.path.normpath(output_file_path)} \n")
     input('\nPress enter to finish')
     
            
