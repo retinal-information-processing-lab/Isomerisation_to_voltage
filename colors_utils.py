@@ -1158,12 +1158,13 @@ def charge_calibration(path, calibration_date=r'20250225',
     if verbose :
         for col_name in all_LEDs :
         
-            plt.plot((calibrations['voltages']),calibrations[col_name])
+            plt.plot((calibrations['voltages']),calibrations[col_name], label=col_name)
             plt.yscale('log')
             plt.xlabel('Tension (V)')
             plt.ylabel('Power (µW/cm²)')
             plt.title('{} LED'.format(col_name))
-            plt.show()
+            plt.legend()
+            plt.show(block=False)
     
     return calibrations, fiber_to_mea_red
 
