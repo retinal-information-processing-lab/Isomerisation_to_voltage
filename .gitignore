@@ -174,3 +174,9 @@ cython_debug/
 .pypirc
 
 *.xlsx#
+
+Example_VoltageList.txt
+
+last_correction.pkl
+
+last_fiber_to_mea_red.pkl
