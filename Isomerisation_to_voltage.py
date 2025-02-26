@@ -23,10 +23,12 @@ if __name__ == '__main__':
             utc_plus_1 = timezone(timedelta(hours=1))
             print("Last Correction Date: {}".format(datetime.fromtimestamp(statbuf.st_mtime, tz=utc_plus_1).strftime("%Y-%m-%d %H:%M UTC+1")))
             calibrations = load_obj('./last_correction.pkl')
+            read_success = True
         except FileNotFoundError:
             print('No previous correction found, user input needed...')
+            read_success = False
             
-    else :
+    if not read_success :
         # Create the root window (it won't be shown)
         root = tk.Tk()
         root.withdraw()  # Hide the root window
