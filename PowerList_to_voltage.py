@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import filedialog
 import pickle
 import os
-
+import time
 
 calibration_file = "/home/guiglaz/Documents/stim generation/calibration_to_volt/calibration_5_colors_w_MEA_20230403.xlsx"
 
@@ -31,19 +31,20 @@ if __name__ == '__main__':
 
     root.quit()
     
-    
     corr = input('Do you want to apply a new correction ? (If no, last correction will be applied)')
     if corr not in ["Yes", 'Y', 'y', 'yes', 'YES', 'Oui','oui','OUI', 'SI', 'Si', 'si']:
         try:
             statbuf = os.stat('./last_correction.pkl')
             utc_plus_1 = timezone(timedelta(hours=1))
             print("Last Correction Date: {}".format(datetime.fromtimestamp(statbuf.st_mtime, tz=utc_plus_1).strftime("%Y-%m-%d %H:%M UTC+1")))
-            calibrations = load_obj('./last_correction.pkl')
+            calibration = load_obj('./last_correction.pkl')
             read_success = True
         except FileNotFoundError:
             print('No previous correction found, user input needed...')
             read_success = False
-            
+    else:
+        read_success = False
+
     if not read_success :
         # Create the root window (it won't be shown)
         root = tk.Tk()
@@ -59,7 +60,7 @@ if __name__ == '__main__':
         root.quit()
 
         calibration, _ = charge_calibration(path = file_path, verbose=True)
-        save_obj(calibrations, './last_correction.pkl')   
+        save_obj(calibration, './last_correction.pkl')   
 
     
     all_leds = list(load_obj(ledDATA_path).keys())
@@ -104,7 +105,7 @@ if __name__ == '__main__':
 
     tot = 0
     with open(powerlist_file, 'r') as file, open(output_file_path, 'w') as output_file:
-        for line in file:
+        for line in tqdm(file, desc = 'Converting Powers to Voltage : ', total=sum(1 for _ in open(powerlist_file))):
             Ptot = list(map(int, line.split()))
 
             # Ensure that the number of columns in the line matches the number of selected LEDs
@@ -115,9 +116,8 @@ if __name__ == '__main__':
             # Write the calculated voltages to the output file in the same format
             output_file.write('\t'.join(map(str, voltage)) + '\n')
             tot += 1
-
+            time.sleep(1) 
     print(f"\nOutput file contains   {tot} colors   and saved at :\n{os.path.normpath(output_file_path)} \n")
-    input('\nPress enter to finish')
     
            
     
