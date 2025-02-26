@@ -31,7 +31,7 @@ if __name__ == '__main__':
 
     root.quit()
     
-    corr = input('Do you want to apply a new correction ? (If no, last correction will be applied)')
+    corr = input('Do you want to apply a new correction (If no, last correction will be applied)? : ')
     if corr not in ["Yes", 'Y', 'y', 'yes', 'YES', 'Oui','oui','OUI', 'SI', 'Si', 'si']:
         try:
             statbuf = os.stat('./last_correction.pkl')
@@ -116,7 +116,6 @@ if __name__ == '__main__':
             # Write the calculated voltages to the output file in the same format
             output_file.write('\t'.join(map(str, voltage)) + '\n')
             tot += 1
-            time.sleep(1) 
     print(f"\nOutput file contains   {tot} colors   and saved at :\n{os.path.normpath(output_file_path)} \n")
     
            

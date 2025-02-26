@@ -16,7 +16,7 @@ ledDATA_path = './IlluminationData.pkl'
 
 if __name__ == '__main__':
     
-    corr = input('Do you want to apply a new correction ? (If no, last correction will be applied)')
+    corr = input('Do you want to apply a new correction (If no, last correction will be applied)? : ')
     if corr not in ["Yes", 'Y', 'y', 'yes', 'YES', 'Oui','oui','OUI', 'SI', 'Si', 'si']:
         try:
             statbuf = os.stat('./last_correction.pkl')
