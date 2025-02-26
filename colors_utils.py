@@ -1176,6 +1176,15 @@ def get_voltages(Ptot, calibration, all_LEDs = ['Violet', 'Blue', 'Green', 'Yell
     for col_i in range(len(all_LEDs)) :
         col_name = all_LEDs[col_i]
         temp_P = float(Ptot[col_i])
+                        
+        # Return 0 voltage if the power is 0
+        if temp_P == 0:
+            driving_tension.append(0)
+            if verbose:
+                print(f"{col_name}: Power is 0, so voltage is 0 V.")
+            continue
+
+        
         calibration_list = calibration[col_name]
         if temp_P>calibration_list[-1]:
             raise ValueError('The given power value is too high. Try putting a lower value.')
@@ -1204,3 +1213,4 @@ def get_voltages(Ptot, calibration, all_LEDs = ['Violet', 'Blue', 'Green', 'Yell
             
     driving_tension = np.array(driving_tension)
     return driving_tension
+
