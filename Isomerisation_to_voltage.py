@@ -101,8 +101,10 @@ if __name__ == '__main__':
     plot_isomerisations([Ptot_solution], selected_LEDs = selected_leds, ledDATA_path = ledDATA_path)
     plt.show(block=False)
     print('\nLEDs Voltages')
-    get_voltages(Ptot_solution, calibration, selected_leds, verbose = True)
-    print("-------------------------------------\n\n")
+    voltage = get_voltages(Ptot_solution, calibration, selected_leds, verbose = True).astype(np.float32)
+    print(f"\nWritten with 8 bits:\n" + "".join(f"{selected_leds[i]}   :    {float32_to_uint8(voltage[i])}\n" for i in range(len(selected_leds))))
+
+    print("-------------------------------------\n")
     input('\nPress enter to finish')
     
            

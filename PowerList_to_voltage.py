@@ -74,7 +74,7 @@ if __name__ == '__main__':
     except:
         pass
     
-    delimiters = [',', ' ', ';', ':', '+']  # List of possible delimiters
+    delimiters = [',', ' ', ';', ':', '+','/']  # List of possible delimiters
     while True:
         print("\nPlease select LEDs by entering the numbers next to them, multiples possible : ")
         for i, led in enumerate(all_leds, start=1):
@@ -99,6 +99,11 @@ if __name__ == '__main__':
         except ValueError:
             print("Invalid input. Please enter numbers separated by valid delimiters.")
         
+    compressed = False
+    compressed = input('Do you want to compress to 8bit (If no, voltage will be float32)? : ')
+    if compressed in ["Yes", 'Y', 'y', 'yes', 'YES', 'Oui','oui','OUI', 'SI', 'Si', 'si']:
+        compressed = True
+        
         
     output_file_path = powerlist_file.replace('PowerList', '')  # Remove 'PowerList' if it exists
     output_file_path = output_file_path.split('.')[0] + 'VoltageList.txt'  # Add '_VoltageList' before the file extension
@@ -113,8 +118,11 @@ if __name__ == '__main__':
 
             voltage = get_voltages(Ptot, calibration, selected_leds)  
             
-            # Write the calculated voltages to the output file in the same format
-            output_file.write('\t'.join(map(str, voltage)) + '\n')
+            # Write the calculated voltages to the output file in the proper format
+            if compressed:
+                output_file.write('\t'.join(map(str, float32_to_uint8(voltage))) + '\n')
+            else:
+                output_file.write('\t'.join(map(str, voltage.astype(np.float32))) + '\n')
             tot += 1
     print(f"\nOutput file contains   {tot} colors   and saved at :\n{os.path.normpath(output_file_path)} \n")
     

@@ -1214,3 +1214,9 @@ def get_voltages(Ptot, calibration, all_LEDs = ['Violet', 'Blue', 'Green', 'Yell
     driving_tension = np.array(driving_tension)
     return driving_tension
 
+def float32_to_uint8(value, min_val = 0, max_val = 5):
+    """
+    Maps a float32 value in the range [0, 5] to an 8-bit integer [0, 255].
+    """
+    value = np.clip(value, min_val, max_val)  # Ensure value is within [0, 5]
+    return np.uint8((value / max_val) * 255)  # Scale and convert
