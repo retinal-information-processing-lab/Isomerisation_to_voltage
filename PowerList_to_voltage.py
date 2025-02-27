@@ -100,7 +100,7 @@ if __name__ == '__main__':
             print("Invalid input. Please enter numbers separated by valid delimiters.")
         
     compressed = False
-    compressed = input('Do you want to compress to 8bit (If no, voltage will be float32)? : ')
+    compressed = input('Do you want to compress 5V from 0 to 255 8bit values (If no, voltage will be float32) ? : ')
     if compressed in ["Yes", 'Y', 'y', 'yes', 'YES', 'Oui','oui','OUI', 'SI', 'Si', 'si']:
         compressed = True
         
@@ -110,7 +110,12 @@ if __name__ == '__main__':
 
     tot = 0
     with open(powerlist_file, 'r') as file, open(output_file_path, 'w') as output_file:
+        output_file.write("{")  # Start of the Arduino-style array
+        first_entry=True
         for line in tqdm(file, desc = 'Converting Powers to Voltage : ', total=sum(1 for _ in open(powerlist_file))):
+            if not first_entry:
+                output_file.write(',')
+            first_entry = False
             Ptot = list(map(float, line.split()))
 
             # Ensure that the number of columns in the line matches the number of selected LEDs
@@ -118,12 +123,16 @@ if __name__ == '__main__':
 
             voltage = get_voltages(Ptot, calibration, selected_leds)  
             
-            # Write the calculated voltages to the output file in the proper format
+            # Format as {x,x,x,x,x} for each row
             if compressed:
-                output_file.write('\t'.join(map(str, float32_to_uint8(voltage))) + '\n')
+                formatted_values = "{" + ",".join(map(lambda v: f"{v:d}", float32_to_uint8(voltage))) + "}"
             else:
-                output_file.write('\t'.join(map(str, voltage.astype(np.float32))) + '\n')
+                formatted_values = "{" + ",".join(map(lambda v: f"{v:f}", voltage.astype(np.float32))) + "}"
+            
+            # Write the calculated voltages to the output file in the proper format
+            output_file.write(formatted_values)
             tot += 1
+        output_file.write("}")  # Start of the Arduino-style array
     print(f"\nOutput file contains   {tot} colors   and saved at :\n{os.path.normpath(output_file_path)} \n")
     
            
