@@ -111,7 +111,7 @@ if __name__ == '__main__':
     tot = 0
     with open(powerlist_file, 'r') as file, open(output_file_path, 'w') as output_file:
         for line in tqdm(file, desc = 'Converting Powers to Voltage : ', total=sum(1 for _ in open(powerlist_file))):
-            Ptot = list(map(int, line.split()))
+            Ptot = list(map(float, line.split()))
 
             # Ensure that the number of columns in the line matches the number of selected LEDs
             assert len(Ptot) == len(selected_leds), f"Mismatch: {len(Ptot)} columns in file, but {len(selected_leds)} LEDs selected."
