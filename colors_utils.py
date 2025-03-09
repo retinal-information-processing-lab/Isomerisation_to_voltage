@@ -1069,104 +1069,90 @@ def save_obj(obj, name ):
     with open( os.path.normpath(name), 'wb') as f:
         pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
 
-def charge_calibration(path, calibration_date=r'20250225', 
-                       all_LEDs = ['Violet', 'Blue', 'Green', 'Yellow', 'Red'],
-                      verbose = True):
+        
+def get_latest_calibration_sheet(workbook):
+    """Retourne la feuille de calibration la plus récente en fonction des dates."""
+    date_sheets = []
+    for sheet in workbook.sheetnames:
+        if sheet[:8].isdigit():  # Vérifie si les 8 premiers caractères sont des chiffres
+            date_sheets.append(int(sheet[:8]))  # Convertit en entier pour comparaison
+    return str(max(date_sheets)) if date_sheets else None
+
+
+def charge_calibration(path, all_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=True):
+    """Charge la calibration et applique les corrections basées sur les mesures utilisateur."""
 
     print('\nC O R R E C T I O N \n')
-    
-    correction = {'Red':None,
-                  'Yellow':None,
-                  'Green':None,
-                  'Blue':None,
-                  'Violet':None, 
-                 }
-    for i in range(len(all_LEDs)):
-        temp_color_name = all_LEDs[i]
-        temp_corr = input('Enter the measured power of the {} LED at 5V (mW): '.format(temp_color_name) )
-        try :
-            temp_corr = float(temp_corr)
-            print('The {} LED power function will be corrected.'.format(temp_color_name) )
-            correction[temp_color_name]=temp_corr
-        except :
-            print('No correction will be applied to the {} LED.'.format(temp_color_name))
-            pass
+
+    correction = {color: None for color in all_LEDs}
+    for color in all_LEDs:
+        temp_corr = input(f'Enter the measured power of the {color} LED at 5V (mW): ')
+        try:
+            correction[color] = float(temp_corr)
+            print(f'The {color} LED power function will be corrected.')
+        except ValueError:
+            print(f'No correction will be applied to the {color} LED.')
 
     print('\nF I L T E R S \n')
-    
-    filters = {'Red':1,
-                'Yellow':1,
-                'Green':1,
-                'Blue':1,
-                'Violet':1, 
-                 }
 
-    for i in range(len(all_LEDs)):
-        temp_color_name = all_LEDs[i]
-        temp_filter = input('Enter the filter transmittance value applied to the {} LED: '.format(temp_color_name))
-        try :
-            temp_filter = float(temp_filter)
-            print('The {} LED will be filtered.'.format(temp_color_name))
-            filters[temp_color_name]=temp_filter
-        except :
-            print('No filter will be applied to the {} LED.'.format(temp_color_name))
-            pass
-    
+    filters = {color: 1 for color in all_LEDs}
+    for color in all_LEDs:
+        temp_filter = input(f'Enter the filter transmittance value applied to the {color} LED: ')
+        try:
+            filters[color] = float(temp_filter)
+            print(f'The {color} LED will be filtered.')
+        except ValueError:
+            print(f'No filter will be applied to the {color} LED.')
+
     all_LEDs = np.flip(all_LEDs)
+    
     wb = pxl.load_workbook(path)
+    calibration_date = get_latest_calibration_sheet(wb)
+    print(f"Using calibration sheet {calibration_date}...")
+
+    if not calibration_date:
+        raise ValueError("Aucune feuille de calibration valide trouvée dans le fichier.")
+
     ws = wb[calibration_date]
-    #col_number = 5
-    #colors = ['625 nm','530 nm','490 nm', '415 nm', '385 nm']
-    
-    fiber_to_mea_red = {'Red':1,
-                        'Yellow':1,
-                        'Green':1,
-                        'Blue':1,
-                        'Violet':1, 
-                 }
-    np.ones(len(all_LEDs))
-    
-    calibrations = {'voltages' : np.array([ws.cell(row=i, column=1).value for i in range(4,21)])}
-    for col_i in range(0,len(all_LEDs)):
-        color_name = all_LEDs[col_i]
-        temp_ratio = ws.cell(row=23, column=2+col_i).value/ws.cell(row=20, column=2+col_i).value
-        fiber_to_mea_red[color_name]=temp_ratio 
-        
-        calibrations[color_name]=np.array([ws.cell(row=i, column=2+col_i).value for i in range(4,21)])
 
+    fiber_to_mea_red = {color: 1 for color in all_LEDs}
+
+    calibrations = {'voltages': np.array([ws.cell(row=i, column=1).value for i in range(4, 21)])}
+    for col_i, color_name in enumerate(all_LEDs):
+        temp_ratio = ws.cell(row=23, column=2 + col_i).value / ws.cell(row=20, column=2 + col_i).value
+        fiber_to_mea_red[color_name] = temp_ratio
         
-        if correction[color_name]!=None :
-            calibrations[color_name]=calibrations[color_name]*correction[color_name]/calibrations[color_name][-1]
+        calibrations[color_name] = np.array([ws.cell(row=i, column=2 + col_i).value for i in range(4, 21)])
+        if correction[color_name] is not None:
+            calibrations[color_name] *= correction[color_name] / calibrations[color_name][-1]
     
-        calibrations[color_name]=calibrations[color_name]*filters[color_name]*fiber_to_mea_red[color_name]
-        print(calibrations[color_name])
-    min_pow=0
-    ind=1
-    old_pow=calibrations[all_LEDs[0]][ind]
-    while min_pow==0 :
-        for col_name in all_LEDs :
-            temp_pow=calibrations[col_name][ind]
-            min_pow = min(temp_pow,old_pow)
-            old_pow=temp_pow
-        ind+=1
-    if ind>=1 :
-        calibrations['voltages']=np.concatenate(([0],calibrations['voltages'][ind:]))
-        for col_name in all_LEDs :
-            calibrations[col_name]=np.concatenate(([0],calibrations[col_name][ind:]))
+        calibrations[color_name] *= filters[color_name] * fiber_to_mea_red[color_name]
 
+    min_pow, ind, old_pow = 0, 1, calibrations[all_LEDs[0]][1]
+    while min_pow == 0 and ind < len(calibrations['voltages']):
+        for color in all_LEDs:
+            temp_pow = calibrations[color][ind]
+            min_pow = min(temp_pow, old_pow)
+            old_pow = temp_pow
+        ind += 1
 
-    if verbose :
-        for col_name in all_LEDs :
-        
-            plt.plot((calibrations['voltages']),calibrations[col_name], label=col_name)
-            plt.yscale('log')
+    if ind >= 1:
+        calibrations['voltages'] = np.concatenate(([0], calibrations['voltages'][ind:]))
+        for color in all_LEDs:
+            calibrations[color] = np.concatenate(([0], calibrations[color][ind:]))
+
+    if verbose:
+        for color in all_LEDs:
+            plt.plot(calibrations['voltages'], calibrations[color], label=color)
+#             plt.yscale('log')
             plt.xlabel('Tension (V)')
             plt.ylabel('Power (µW/cm²)')
-            plt.title('{} LED'.format(col_name))
+            plt.title(f'{color} LED')
             plt.legend()
             plt.show(block=False)
-    
+
     return calibrations, fiber_to_mea_red
+
 
 def get_voltages(Ptot, calibration, all_LEDs = ['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=False):
 
