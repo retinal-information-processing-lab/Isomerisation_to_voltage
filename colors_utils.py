@@ -1069,17 +1069,115 @@ def save_obj(obj, name ):
     with open( os.path.normpath(name), 'wb') as f:
         pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
 
+
+
+def save_correction_to_txt(correction, filters, file_path='./last_correction.txt'):
+    """
+    Save the calibration data to a user-friendly text file, handling None values.
+
+    Parameters:
+    - correction (dict): The correction values for each LED.
+    - filters (dict): The filter transmittance values for each LED.
+    - file_path (str): The path where the text file will be saved. Default is './last_correction.txt'.
+    """
+    with open(file_path, 'w') as file:
+        file.write("Correction Data\n")
+        file.write("================\n\n")
         
-def get_latest_calibration_sheet(workbook):
-    """Retourne la feuille de calibration la plus récente en fonction des dates."""
-    date_sheets = []
-    for sheet in workbook.sheetnames:
-        if sheet[:8].isdigit():  # Vérifie si les 8 premiers caractères sont des chiffres
-            date_sheets.append(int(sheet[:8]))  # Convertit en entier pour comparaison
-    return str(max(date_sheets)) if date_sheets else None
+        file.write("Power Values (µW/cm²):\n")
+        for color, value in correction.items():
+            # Write "None" if the value is None
+            value_str = str(value) if value is not None else "None"
+            file.write(f"{color} LED:\t{value_str}\tµW/cm²\n")
 
+        file.write("\n\nFilters Transmittance :\n")
+        for color, value in filters.items():
+            # Write "None" if the value is None
+            value_str = str(value) if value is not None else "None"
+            file.write(f"{color} LED:\t{value_str}\n")
+        
+    
+def load_correction_from_txt(file_path='./last_correction.txt'):
+    """
+    Load the correction and filter data from a text file, handling None values.
 
-def charge_calibration(path, all_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=True):
+    Parameters:
+    - file_path (str): The path to the text file containing the correction and filter data.
+                      Default is './last_correction.txt'.
+
+    Returns:
+    - correction (dict): A dictionary containing the correction values for each LED.
+    - filters (dict): A dictionary containing the filter transmittance values for each LED.
+    """
+    correction = {}
+    filters = {}
+
+    with open(file_path, 'r') as file:
+        lines = file.readlines()
+
+        # Flag to track which section is being read
+        reading_correction = False
+        reading_filters = False
+
+        for line in lines:
+            # Start reading correction data
+            if line.startswith("Power Values (µW/cm²):"):
+                reading_correction = True
+                reading_filters = False
+                continue
+
+            # Start reading filter data
+            if line.startswith("Filters Transmittance :"):
+                reading_correction = False
+                reading_filters = True
+                continue
+
+            # Parse correction data
+            if reading_correction and "LED:" in line:
+                parts = line.strip().split()
+                color = parts[0]  # Extract the color name
+                value_str = parts[2]  # Extract the value as a string
+                # Convert "None" to None, otherwise convert to float
+                value = None if value_str == "None" else float(value_str)
+                correction[color] = value
+
+            # Parse filter data
+            if reading_filters and "LED:" in line:
+                parts = line.strip().split()
+                color = parts[0]  # Extract the color name
+                value_str = parts[2]  # Extract the value as a string
+                # Convert "None" to None, otherwise convert to float
+                value = None if value_str == "None" else float(value_str)
+                filters[color] = value
+
+    return correction, filters
+
+    
+def save_calibration_file_path(file_path, path= './calibration_file_path.txt'):
+    """
+    Save the path of a calibration file to './calibration_file_path.txt'.
+
+    Parameters:
+    - file_path (str): The path of the calibration file to be saved.
+    """
+    with open(path, 'w') as file:
+        file.write(os.path.abspath(file_path))
+    
+    
+def load_calibration_file_path(path= './calibration_file_path.txt'):
+    """
+    Load the path of the calibration file from './calibration_file_path.txt'.
+
+    Returns:
+    - file_path (str): The path of the calibration file.
+    """
+    with open(path, 'r') as file:
+        file_path = file.read().strip()
+    return file_path
+
+    
+    
+def get_corrections(all_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red']):
     """Charge la calibration et applique les corrections basées sur les mesures utilisateur."""
 
     print('\nC O R R E C T I O N \n')
@@ -1103,11 +1201,27 @@ def charge_calibration(path, all_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red
             print(f'The {color} LED will be filtered.')
         except ValueError:
             print(f'No filter will be applied to the {color} LED.')
+    return correction, filters
+
+    
+
+def get_latest_calibration_sheet(file_path):
+    """Retourne la feuille de calibration la plus récente en fonction des dates."""
+    wb = pxl.load_workbook(os.path.normpath(file_path))
+    date_sheets = []
+    for sheet in wb.sheetnames:
+        if sheet[:8].isdigit():  # Vérifie si les 8 premiers caractères sont des chiffres
+            date_sheets.append(int(sheet[:8]))  # Convertit en entier pour comparaison
+    return str(max(date_sheets)) if date_sheets else None
+
+    
+def charge_calibration(path, correction, filters, all_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=True):
+    """Charge la calibration et applique les corrections basées sur les mesures utilisateur."""
 
     all_LEDs = np.flip(all_LEDs)
     
     wb = pxl.load_workbook(path)
-    calibration_date = get_latest_calibration_sheet(wb)
+    calibration_date = get_latest_calibration_sheet(path)
     print(f"Using calibration sheet {calibration_date}...")
 
     if not calibration_date:
@@ -1143,6 +1257,7 @@ def charge_calibration(path, all_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red
 
     if verbose:
         for color in all_LEDs:
+            plt.figure()
             plt.plot(calibrations['voltages'], calibrations[color], label=color)
 #             plt.yscale('log')
             plt.xlabel('Tension (V)')
@@ -1199,6 +1314,7 @@ def get_voltages(Ptot, calibration, all_LEDs = ['Violet', 'Blue', 'Green', 'Yell
             
     driving_tension = np.array(driving_tension)
     return driving_tension
+
 
 def float32_to_uint8(value, min_val = 0, max_val = 5):
     """
