@@ -1,0 +1,10 @@
+Correction Data
+================
+
+Power Values (mW at 5V):
+Blue LED:	1.5	mW
+Green LED:	0.35	mW
+Red LED:	21.5	mW
+Violet LED:	5.0	mW
+Yellow LED:	0.87	mW
+test LED:	75.0	mW
