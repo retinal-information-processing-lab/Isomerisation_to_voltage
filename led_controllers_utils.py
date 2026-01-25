@@ -46,7 +46,7 @@ def load_correction_from_txt(file_path='./last_correction.txt'):
             correction[color] = None if value == "None" else float(value)
     return correction
 
-def get_corrections(all_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red']):
+def get_corrections(selected_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red']):
     """
     Returns a dictionary with updated values, or existing ones from the file 
     if no input is provided. New LEDs default to None.
@@ -57,7 +57,7 @@ def get_corrections(all_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red']):
     current_stored = load_correction_from_txt('./last_correction.txt')
     correction = {}
     
-    for color in all_LEDs:
+    for color in selected_LEDs:
         # Get existing value from file
         stored_val = current_stored.get(color, None)
         
@@ -97,7 +97,7 @@ def save_correction_to_txt(final_correction, file_path='./last_correction.txt'):
             
 
 
-def _get_latest_sheet_name(path):
+def get_latest_sheet_name(path):
     """Identifie le nom de la feuille avec la date YYYYMMDD la plus récente."""
     wb = pxl.load_workbook(path, read_only=True)
     dates = []
@@ -109,6 +109,8 @@ def _get_latest_sheet_name(path):
     if not dates:
         raise ValueError("Aucune feuille au format YYYYMMDD trouvée dans le fichier Excel.")
     return max(dates).strftime("%Y%m%d")
+
+
 
 def _find_led_columns(ws, selected_LEDs):
     """
@@ -131,105 +133,111 @@ def _find_led_columns(ws, selected_LEDs):
         col_map[led_name] = found_idx
     return col_map
 
-def _plot_results_grid(results, sheet_name):
-    """Génère une grille de graphiques pour que chaque LED ait son échelle propre."""
-    leds = [k for k in results.keys() if k != 'voltages']
+def _plot_results_with_spectra(results, spectra, sheet_name):
+    """
+    Génère une grille de graphiques : 
+    Colonne 1 : Spectre d'émission (nm) | Colonne 2 : Courbe de puissance (V)
+    """
+    leds = [k for k in results.keys() if k not in ['voltages', 'ordered_leds']]
     n_leds = len(leds)
     
-    # Calcul de la taille de la grille
-    cols = 2 if n_leds > 1 else 1
-    rows = math.ceil(n_leds / cols)
+    # On crée une figure avec N lignes (une par LED) et 2 colonnes
+    fig, axes = plt.subplots(n_leds, 2, figsize=(14, 4 * n_leds), squeeze=False)
     
-    fig, axes = plt.subplots(rows, cols, figsize=(12, 4 * rows), squeeze=False)
-    axes = axes.flatten()
-    
-    for i, led in enumerate(leds):
-        ax = axes[i]
-        ax.plot(results['voltages'], results[led], marker='o', color=f'C{i}', label=led)
-        ax.set_title(f"Puissance Surfacique : {led}")
-        ax.set_xlabel("Tension (V)")
-        ax.set_ylabel("µW/cm²")
-        ax.grid(True, alpha=0.3)
-        ax.legend()
+    # Couleurs par défaut pour les spectres
+    color_map = {
+        "blue": "blue", "green": "green", "red": "red", 
+        "white": "grey", "violet": "purple", "yellow": "orange"
+    }
 
-    # Supprimer les axes vides si nécessaire
-    for j in range(i + 1, len(axes)):
-        fig.delaxes(axes[j])
+    for i, led in enumerate(leds):
+        # --- AXE GAUCHE : SPECTRE ---
+        ax_spec = axes[i, 0]
+        x_spec = spectra.get("x_axis")
         
-    plt.suptitle(f"Calibration Session : {sheet_name}", fontsize=16)
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        # Recherche du spectre correspondant (match partiel)
+        spec_key = next((k for k in spectra.keys() if led.lower() in k.lower() and k != "x_axis"), None)
+        
+        if spec_key and x_spec is not None:
+            y_spec = spectra[spec_key]
+            # Normalisation 0-1
+            y_norm = np.clip(y_spec / np.max(y_spec), 0, None)
+            
+            # Choix de la couleur
+            c = next((color_map[k] for k in color_map if k in led.lower()), "black")
+            
+            ax_spec.plot(x_spec, y_norm, color=c, lw=2)
+            ax_spec.fill_between(x_spec, y_norm, color=c, alpha=0.2)
+            ax_spec.set_title(f"Spectre d'émission : {led}")
+            ax_spec.set_xlabel("Wavelength (nm)")
+            ax_spec.set_ylabel("Normalized Intensity")
+        else:
+            ax_spec.text(0.5, 0.5, "Spectre non trouvé", ha='center')
+
+        ax_spec.grid(True, alpha=0.3)
+
+        # --- AXE DROIT : CALIBRATION ---
+        ax_calib = axes[i, 1]
+        ax_calib.plot(results['voltages'], results[led], marker='o', color='black', label='Calibration')
+        ax_calib.set_title(f"Puissance Surfacique : {led}")
+        ax_calib.set_xlabel("Tension (V)")
+        ax_calib.set_ylabel("µW/cm²")
+        ax_calib.grid(True, alpha=0.3)
+
+    plt.suptitle(f"Analyse de Calibration : {sheet_name}", fontsize=16, fontweight='bold')
+    plt.tight_layout(rect=[0, 0.03, 1, 0.97])
     plt.show()
 
-def charge_calibration(path, correction, selected_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=True):
-    """
-    Charge la calibration depuis un fichier Excel pour une sélection de LEDs.
+def charge_calibration(path_excel, correction,path_spectra= './IlluminationData.pkl', selected_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=True):
     
-    Prend en compte la session la plus récente et applique les ratios mesurés 
-    pour convertir la puissance (mW) en puissance surfacique (µW/cm²).
-    
-    Args:
-        path (str): Chemin vers le fichier Excel.
-        correction (dict): {Nom_LED: Puissance_mW_a_5V} ou None pour utiliser l'Excel.
-        selected_LEDs (list): Liste des noms de LEDs à extraire.
-        verbose (bool): Si True, affiche une grille de courbes de puissance surfacique.
-        
-    Returns:
-        dict: {
-            'voltages': np.array,
-            'NomLED1': np.array,
-            ...
-        }
     """
-    # 1. Sélection de la feuille
-    sheet_name = _get_latest_sheet_name(path)
-    wb = pxl.load_workbook(path, data_only=True)
+    Version étendue chargeant la calibration et les spectres.
+    """
+    # 1. Chargement des spectres (via ta fonction ledSpectrums ou direct)
+    # On force plot=False ici car on va gérer le plot nous-mêmes dans la grille
+    spectra_data = ledSpectrums(path=path_spectra, plot=False)
+    
+    # 2. Sélection de la feuille et ouverture Excel
+    sheet_name = get_latest_sheet_name(path_excel)
+    wb = pxl.load_workbook(path_excel, data_only=True)
     ws = wb[sheet_name]
     
-    # 2. Identification des colonnes
     col_map = _find_led_columns(ws, selected_LEDs)
-    
-    # 3. Extraction de l'axe X (Tensions)
     voltages = np.array([ws.cell(row=i, column=1).value for i in range(4, 21)], dtype=float)
     
     results = {'voltages': voltages}
     
-    # 4. Traitement par LED
+    # 3. Traitement par LED
     for led in selected_LEDs:
         col = col_map[led]
-        
-        # Courbe brute (mW)
         p_curve = np.array([ws.cell(row=i, column=col).value for i in range(4, 21)], dtype=float)
         
-        # Points de calibration pour le ratio (on recalcule la valeur de la ligne 24 de l'excel)
         p_5v_excel = ws.cell(row=20, column=col).value
         ps_5v_excel = ws.cell(row=23, column=col).value
         
-        # Ratio dynamique (µW/cm² / mW)
         ratio = ps_5v_excel / p_5v_excel if p_5v_excel and p_5v_excel != 0 else 0
         
-        # Cible de puissance à 5V
         target_p_5v = correction.get(led)
         if target_p_5v is None:
             target_p_5v = p_5v_excel
             
-        # Mise à l'échelle et transformation
         scaling = target_p_5v / p_5v_excel if p_5v_excel != 0 else 0
         results[led] = (p_curve * scaling) * ratio
 
-    # 5. Visualisation
+    # 4. Visualisation combinée
     if verbose:
-        _plot_results_grid(results, sheet_name)
+        _plot_results_with_spectra(results, spectra_data, sheet_name)
         
     return results
 
 
-def get_voltages(Ptot, calibration, all_LEDs = ['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=False):
+def get_voltages(Ptot, calibration, selected_LEDs = ['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=False):
 
     voltages = calibration['voltages']
     driving_tension = []
     
-    for col_i in range(len(all_LEDs)) :
-        col_name = all_LEDs[col_i]
+    for col_i in range(len(selected_LEDs)) :
+        col_name = selected_LEDs[col_i]
         temp_P = float(Ptot[col_i])
                         
         # Return 0 voltage if the power is 0
