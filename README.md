@@ -1,110 +1,82 @@
-# 🔆 LED Voltage Calculation from Isomerisation
+# 🔆 LED Voltage Calculation Tools
+
+---
 
 ## 🚀 Project Overview
 
-This project calculates the required LED voltage based on user-defined **isomerisation** values. The program enables users to:
+Ce projet permet de calculer les voltages nécessaires pour piloter des LEDs en fonction de cibles de puissance ou d'isomérisation. Il automatise le lien entre mesures physiques, spectres d'émission et commandes hardware.
 
-- Load the latest **LED voltage calibration** data.
-- Apply **correction factors** based on current-day LED power measurements (measured at the **optic fiber output** with a **5V output from an Arduino**).
-- Compute the required **LED voltage** based on user-specified **isomerisation targets**.
-
-### 🔬 How It Works
-
-The program adjusts LED calibration using:
-
-- 📊 The latest **calibration data** (typically stored in an **Excel file**).
-- 🛠 User inputs for **today’s correction factors** and **filter values** (transmittance, **not ND**; see the **filters measurement sheet**).
-  - If filter values are unknown, you can fine-tune the **"Direct at 5V"** instead.
-  - Set **"Direct at 5V = True"** if filters are **after** the optic fiber output. Otherwise, either a **full calibration** is needed, or the **adjusting factor** will be larger.
-- 🔆 **Isomerisation targets** for different **opsins** (e.g., "S-cones", "M-cones", "Rods", "Melanopsin").
-
-The program outputs the necessary **LED voltage values** based on the required **isomerisation** and the corresponding **calibration data**.
+**Outils principaux :**
+* **Isomerisation_to_voltage.py** : Calcul basé sur les cibles d'isomérisation (S-cones, M-cones, Rods, Melanopsin).
+* **PowerList_to_voltage.py** : Conversion massive d'un fichier `.txt` de puissances vers un `.csv` de tensions.
 
 ---
 
-## 📦 Installation & Dependencies
 
-### ✅ Prerequisites
-- **Python 3.9.16** (same version as required for the **analysis pipeline**).
+## 📦 Installation (Conda)
 
-### 📌 Install Required Packages
-Use the following `requirements.txt` file to install dependencies:
+Le projet nécessite un environnement Python 3.10 géré par Conda pour la stabilité des bibliothèques scientifiques et graphiques.
 
-```plaintext
-openpyxl
-numpy
-matplotlib
-tqdm
-tkinter
-pickle
-itertools
-plotly
-Pillow
-scipy
-pyinstaller
-```
-
-
-Install them via pip:
+### 1. Créer l'environnement
+Utilisez le fichier `environment.yml` :
 ```bash
-pip install -r requirements.txt
+conda env create -f environment.yml
 ```
 
-> **Note:** This uses the same `color_utils` as the color pipeline.
+### 2. Contenu de environment.yml
+```yaml
+name: led_calib_env
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - openpyxl
+  - matplotlib
+  - tqdm
+  - plotly
+  - pillow
+  - scipy
+  - tk
+```
 
 ---
 
-## 🏗️ Building the Executable
+## 🏗️ Utilisation & Lancement
 
-To package the script into a standalone executable, run the following command in your folder with active env:
+### Lancement Automatisé
+Utilisez les scripts fournis pour activer l'environnement et lancer le programme :
+* **Windows** : `run_script.bat`
+* **Linux** : `run_script.sh` (faire `chmod +x run_script.sh` au préalable)
 
-```bash
-pyinstaller --onefile --console --distpath . \
-  --add-data "PhotoReceptorData.pkl;." \
-  --add-data "IlluminationData.pkl;." \
-  --add-data "colors_utils.py;." \
-  Isomerisation_to_voltage.py
-```
-pyinstaller --onefile --console --distpath . --add-data "PhotoReceptorData.pkl;." --add-data "IlluminationData.pkl;." --add-data "colors_utils.py;." Isomerisation_to_voltage.py
-  
-  
-Same for PowerList_to_voltage
+### Phase de Correction
+Au démarrage, le programme affiche l'heure de la dernière modification enregistrée.
+* **Pour modifier** : Tapez la nouvelle valeur en mW et validez.
+* **Pour conserver** : Appuyez sur **Entrée** sans rien taper.
+* **Horodatage** : La date `Last updated` dans `last_correction.txt` ne change **que si** une valeur numérique est réellement modifiée.
 
-```bash
-pyinstaller --onefile --console --distpath . \
-  --add-data "PhotoReceptorData.pkl;." \
-  --add-data "IlluminationData.pkl;." \
-  --add-data "colors_utils.py;." \
-  PowerList_to_voltage.py
-```
-pyinstaller --onefile --console --distpath . --add-data "PhotoReceptorData.pkl;." --add-data "IlluminationData.pkl;." --add-data "colors_utils.py;." PowerList_to_voltage.py
-  
-  
-### 🔧 Explanation of Parameters:
-- `--onefile`: Bundles everything into a single executable.
-- `--console`: Ensures a console appears when the program runs.
-- `--add-data`: Includes required data files (adjust paths as needed).
-  - On **Windows**, use `;` to separate paths.
-  - On **Linux**, use `:` if `;` does not work.
-- `--distpath .`: Places the executable in the current directory.
+---
 
-## Running the Program
+## 🔬 Logique de Traitement
 
-Once you’ve built the executable, run it by following the prompts in the console window. The program will:
+1.  **Correction Temps Réel** : Ajustement via une mesure à 5V en sortie de fibre. Si aucune valeur n'est saisie, le système utilise les données par défaut de la dernière correction ou, à defaut, de l'Excel.
+2.  **Ratio de Transformation** : Calcul dynamique du ratio (mW -> µW/cm²) incluant les atténuations et transformations du microscope (repose uniquement sur le fichier excel de calibration).
+3.  **Visualisation Grid** : Pour chaque LED, affichage côte à côte du spectre d'émission (`.pkl`) et de la courbe de calibration calculée.
+4.  **Interpolation Linéaire** : Inversion de la courbe de puissance pour trouver la tension exacte via `np.interp`.
 
-- Ask the user to select the calibration file using a file dialog.
-- Ask the user to input correction factors for LEDs. This is today's measurement of each LED at 5V (use Arduino, not manually) AT THE OPTIC FIBER OUTPUT!
-- Prompt the user for target isomerisation values for different opsins (e.g., "Scones", "Mcones", "Rods", "Mela").
-- Display plots of the calibration data and isomerisation, and calculate the required LED voltages for the provided isomerisation values.
+---
+## 📂 Structure du Projet
 
-### Notes
-- Make sure that the data files (PhotoReceptorData.pkl, IlluminationData.pkl, colors_utils.py) are present in the same directory as the executable or properly included during packaging (via --add-data).
-- You can create a shortcut to this executable to have a clean portable executable.
-- On Linux, you need to create a bash file to execute the program or run it from a terminal with `./Isomerisation_to_voltage`.
+* `PowerList_to_voltage.py` / `Isomerisation_to_voltage.py` : Scripts de haut niveau.
+* `led_controllers_utils.py` : Fonctions de calcul, parsing Excel et gestion des corrections.
+* `colors_utils.py` : Gestion des spectres et des fichiers Pickle.
+* `IlluminationData.csv` : Données spectrales des LEDs. (Save a copy as a pkl file for color_utils to work properly while allowing easy modification of leds spectrums)
+* `PhotoReceptorData.pkl` : Sensibilités spectrales des opsines.
+* `last_correction.txt` : Historique et valeurs de correction persistantes.
 
+---
 
-
-
-
-
-
+## 📝 Sortie de données
+Le fichier `VoltageList.csv` généré est au format "raw" (sans header). Chaque ligne correspond aux tensions à appliquer simultanément sur les différentes LEDs pour chaque état demandé.
