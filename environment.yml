@@ -1,0 +1,15 @@
+name: led_calib_env
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - openpyxl
+  - matplotlib
+  - tqdm
+  - plotly
+  - pillow
+  - scipy
+  - tk
