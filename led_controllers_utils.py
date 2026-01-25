@@ -35,26 +35,26 @@ def load_spectral_dict_from_csv(file_path):
     return data_dict
 
 
+
 def load_correction_from_txt(file_path='./last_correction.txt'):
-    if not os.path.exists(file_path):
-        return {}
-    correction = {}
+    if not os.path.exists(file_path): return {}, "Never"
     with open(file_path, 'r') as file:
         content = file.read()
         matches = re.findall(r"([\w\d_-]+) LED:\s+([\d\.]+|None)", content)
-        for color, value in matches:
-            correction[color] = None if value == "None" else float(value)
-    return correction
+        correction = {c: (None if v == "None" else float(v)) for c, v in matches}
+        ts = re.search(r"Last updated:\s+(.*)", content)
+        return correction, (ts.group(1).strip() if ts else "Unknown")
 
 def get_corrections(selected_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red']):
     """
     Returns a dictionary with updated values, or existing ones from the file 
     if no input is provided. New LEDs default to None.
     """
-    print('\n--- CORRECTION PHASE ---')
+    print('\n--- CORRECTION UPDATE ---')
     
     # 1. Load the current state from the file
-    current_stored = load_correction_from_txt('./last_correction.txt')
+    current_stored, timestamp = load_correction_from_txt('./last_correction.txt')
+    print(f"Last update recorded: {timestamp}")
     correction = {}
     
     for color in selected_LEDs:
@@ -80,21 +80,16 @@ def get_corrections(selected_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red']):
     return correction
 
 def save_correction_to_txt(final_correction, file_path='./last_correction.txt'):
-    """
-    Saves the merged dictionary directly to the file.
-    """
-    # We still merge just in case the file contains LEDs NOT in the current 'all_LEDs' list
-    full_data = load_correction_from_txt(file_path)
-    full_data.update(final_correction)
+    cur, ts = load_correction_from_txt(file_path) # Récupère dict et timestamp existant
+    if any(v != cur.get(k) for k, v in final_correction.items()):
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S") # Update si changement
 
+    cur.update(final_correction)
     with open(file_path, 'w') as f:
-        f.write("Correction Data\n================\n\nPower Values (mW at 5V):\n")
-        for color in sorted(full_data.keys()):
-            val = full_data[color]
-            val_str = "None" if val is None else f"{val}"
-            f.write(f"{color} LED:\t{val_str}\tmW\n")
-            
-            
+        f.write(f"Correction Data\nLast updated: {ts}\n================\n\nPower Values (mW at 5V):\n")
+        for c in sorted(cur.keys()):
+            v = "None" if cur[c] is None else cur[c]
+            f.write(f"{c} LED:\t{v}\tmW\n")
 
 
 def get_latest_sheet_name(path):
@@ -188,7 +183,7 @@ def _plot_results_with_spectra(results, spectra, sheet_name):
     plt.tight_layout(rect=[0, 0.03, 1, 0.97])
     plt.show()
 
-def charge_calibration(path_excel, correction,path_spectra= './IlluminationData.pkl', selected_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=True):
+def charge_calibration(path_excel, correction, path_spectra= './IlluminationData.pkl', selected_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=True):
     
     """
     Version étendue chargeant la calibration et les spectres.
