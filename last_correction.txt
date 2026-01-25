@@ -1,10 +1,11 @@
 Correction Data
-Last updated: 2026-01-25 13:28:50
+Last updated: 2026-01-25 17:52:23
 ================
 
 Power Values (mW at 5V):
+595xDM605xF600 LED:	24.3	mW
 Blue LED:	1.5	mW
-Green LED:	0.32	mW
+Green LED:	0.35	mW
 Red LED:	21.3	mW
 Violet LED:	5.0	mW
 Yellow LED:	0.85	mW
