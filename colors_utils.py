@@ -654,9 +654,12 @@ def interactive_Ptot_slider(
     root.maxsize(1000, 800)
     root.title("Interactive Ptot Slider")
     root.resizable(True, True)
-    photo = tk.PhotoImage(file = "isomerisation_icon.png")
-    root.wm_iconphoto(False, photo)
-
+    try:
+        photo = tk.PhotoImage(file = "isomerisation_icon.png")
+        root.wm_iconphoto(False, photo)
+    except:
+        pass
+    
     # Create sliders for each LED in Ptot (each slider goes from 0 to max value for each LED)
     Ptot_values = [tk.DoubleVar(value=1.0) for _ in selected_LEDs]
     value_entries = {}  # List to store Entry widgets

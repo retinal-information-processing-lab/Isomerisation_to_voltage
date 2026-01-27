@@ -13,3 +13,4 @@ dependencies:
   - pillow
   - scipy
   - tk
+  - python-kaleido 
