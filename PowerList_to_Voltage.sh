@@ -1,20 +1,23 @@
 #!/bin/bash
 ENV_NAME="led_calib_env"
 
-# Initialisation de conda pour les scripts shell (indispensable)
-eval "$(conda shell.bash hook)"
+# 1. On définit le chemin vers l'installation de conda
+# (Vérifie ce chemin en tapant 'conda info --base' dans ton terminal)
+CONDA_PATH="$HOME/anaconda3" 
 
-echo "[INFO] Activation de l'environnement $ENV_NAME..."
-conda activate $ENV_NAME
-
-if [ $? -ne 0 ]; then
-    echo "[ERREUR] Impossible d'activer l'environnement. Verifie qu'il est bien cree."
-    read -p "Pressez Entree pour quitter."
+# 2. On charge les fonctions shell de conda
+if [ -f "$CONDA_PATH/etc/profile.d/conda.sh" ]; then
+    source "$CONDA_PATH/etc/profile.d/conda.sh"
+else
+    echo "Erreur : conda.sh non trouvé dans $CONDA_PATH"
     exit 1
 fi
 
+# 3. Maintenant utiliser conda 
+conda activate led_calib_env
+
 echo "[INFO] Lancement de PowerList_to_voltage..."
-python3 PowerList_to_voltage.py
+python3 PowerList_to_Voltage.py
 
 # Garde le terminal ouvert si le script Python plante
 if [ $? -ne 0 ]; then

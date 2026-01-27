@@ -12,6 +12,6 @@ if %errorlevel% neq 0 (
 )
 
 echo [INFO] Lancement de PowerList_to_voltage...
-python Ptot_Slider.py
+python Isomerisation_to_voltage.py
 
 pause

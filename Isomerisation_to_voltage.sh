@@ -17,7 +17,7 @@ fi
 conda activate led_calib_env
 
 echo "[INFO] Lancement de PowerList_to_voltage..."
-python3 Ptot_Slider.py
+python3 Isomerisation_to_voltage.py
 
 # Garde le terminal ouvert si le script Python plante
 if [ $? -ne 0 ]; then
