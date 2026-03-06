@@ -1823,7 +1823,7 @@ def interactive_iso_target_slider(
         P_full = [0.0] * len(selected_LEDs)
         for j, led in enumerate(active_leds):
             P_full[selected_LEDs.index(led)] = result["P"][j]
-        text = " ".join(f"{p:.6f}" for p in P_full)
+        text = " ".join(f"{p:.3f}" for p in P_full)
         root.clipboard_clear()
         root.clipboard_append(text)
         root.update()
