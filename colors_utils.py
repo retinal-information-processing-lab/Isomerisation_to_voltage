@@ -954,7 +954,12 @@ def interactive_Ptot_slider_v2(
         return "\n".join(lines)
 
     def print_values():
-        print(_get_values_text())
+        win = tk.Toplevel(root)
+        win.title("Current values")
+        win.resizable(False, False)
+        tk.Label(win, text=_get_values_text(), justify="left",
+                 font=("Courier", 10), padx=16, pady=12).pack()
+        ttk.Button(win, text="Close", command=win.destroy).pack(pady=(0, 10))
 
     def copy_to_clipboard():
         text = _get_values_text()
@@ -1802,10 +1807,23 @@ def interactive_iso_target_slider(
         return "\n".join(lines)
 
     def print_values():
-        print(_get_values_text())
+        win = tk.Toplevel(root)
+        win.title("Current values")
+        win.resizable(False, False)
+        tk.Label(win, text=_get_values_text(), justify="left",
+                 font=("Courier", 10), padx=16, pady=12).pack()
+        ttk.Button(win, text="Close", command=win.destroy).pack(pady=(0, 10))
 
     def copy_to_clipboard():
-        text = _get_values_text()
+        # PowerList format: space-separated floats, one value per LED, all LEDs in order
+        result = _get_current_result()
+        if result is None:
+            return
+        active_leds = [led for led in selected_LEDs if led_active[led].get()]
+        P_full = [0.0] * len(selected_LEDs)
+        for j, led in enumerate(active_leds):
+            P_full[selected_LEDs.index(led)] = result["P"][j]
+        text = " ".join(f"{p:.6f}" for p in P_full)
         root.clipboard_clear()
         root.clipboard_append(text)
         root.update()

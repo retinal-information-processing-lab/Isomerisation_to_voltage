@@ -1,8 +1,6 @@
 @echo off
 set ENV_NAME=led_calib_env
 
-echo [INFO] Activation de l'environnement %ENV_NAME%...
-:: On utilise 'call' pour s'assurer que conda s'initialise bien dans le batch
 call conda activate %ENV_NAME%
 
 if %errorlevel% neq 0 (
@@ -11,7 +9,4 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
-echo [INFO] Lancement de PowerList_to_voltage...
-python Ptot_Slider.py
-
-pause
+start "" pythonw Ptot_Slider.py

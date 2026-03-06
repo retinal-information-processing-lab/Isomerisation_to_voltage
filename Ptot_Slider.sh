@@ -1,26 +1,14 @@
 #!/bin/bash
-ENV_NAME="led_calib_env"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_PYTHON="$HOME/anaconda3/envs/led_calib_env/bin/python3"
 
-# 1. On définit le chemin vers l'installation de conda
-# (Vérifie ce chemin en tapant 'conda info --base' dans ton terminal)
-CONDA_PATH="$HOME/anaconda3" 
-
-# 2. On charge les fonctions shell de conda
-if [ -f "$CONDA_PATH/etc/profile.d/conda.sh" ]; then
-    source "$CONDA_PATH/etc/profile.d/conda.sh"
-else
-    echo "Erreur : conda.sh non trouvé dans $CONDA_PATH"
-    exit 1
-fi
-
-# 3. Maintenant utiliser conda 
-conda activate led_calib_env
-
-echo "[INFO] Lancement de PowerList_to_voltage..."
-python3 Ptot_Slider.py
-
-# Garde le terminal ouvert si le script Python plante
-if [ $? -ne 0 ]; then
-    echo "[ERREUR] Le script s'est arrete prematurement."
-    read -p "Pressez Entree pour quitter."
-fi
+"$ENV_PYTHON" -c "
+import subprocess, os
+subprocess.Popen(
+    ['$ENV_PYTHON', '$SCRIPT_DIR/Ptot_Slider.py'],
+    cwd='$SCRIPT_DIR',
+    start_new_session=True,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL
+)
+"
