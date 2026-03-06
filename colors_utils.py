@@ -1507,46 +1507,77 @@ def solve_isomerisation_target(
     else:
         case = 'overdetermined'
 
-    # Build weights based on mode (only meaningful for underdetermined)
+    # --- Maximize mode: analytical two-phase solve, bypasses general optimizer ---
+    if mode == 'maximize' and maximize_led in selected_LEDs:
+        mode_used = mode
+        idx = selected_LEDs.index(maximize_led)
+
+        # Phase 1: how much can the chosen LED contribute alone?
+        a_col = A[:, idx:idx+1]  # (n_ops, 1)
+        p_idx_solo = float(np.linalg.lstsq(a_col, target.reshape(-1, 1), rcond=None)[0][0])
+        p_idx_solo = max(0.0, p_idx_solo)
+        residual_solo = target - A[:, idx] * p_idx_solo
+
+        if np.linalg.norm(residual_solo) < 1e-6 * (np.linalg.norm(target) + 1e-12):
+            # Chosen LED alone satisfies the constraint — clean solution
+            P = np.zeros(n_leds)
+            P[idx] = p_idx_solo
+        else:
+            # Phase 2: chosen LED can't cover everything alone — fill residual sparsely
+            other_idx = [i for i in range(n_leds) if i != idx]
+            A_rest = A[:, other_idx]
+            l1 = np.mean(np.abs(target)) * 1e-3
+
+            def obj_rest(P_rest):
+                return (np.linalg.norm(A_rest @ P_rest - residual_solo) ** 2
+                        + l1 * np.sum(np.abs(P_rest)))
+
+            res = scipy.optimize.minimize(obj_rest, np.ones(len(other_idx)),
+                                          bounds=[(0, None)] * len(other_idx),
+                                          method='L-BFGS-B',
+                                          options={'maxiter': 10000, 'ftol': 1e-12, 'gtol': 1e-8})
+            P = np.zeros(n_leds)
+            P[idx] = p_idx_solo
+            for k, oi in enumerate(other_idx):
+                P[oi] = res.x[k]
+
+        P = np.maximum(P, 0)
+        iso_achieved = A @ P
+        error = float(np.linalg.norm(iso_achieved - target))
+        return {
+            'P': P, 'iso_achieved': iso_achieved,
+            'error': error, 'case': case, 'mode_used': mode_used,
+        }
+
+    # --- General optimizer for balanced / sparse / LMS ---
+    bounds = [(0, None) for _ in selected_LEDs]
+    initial_guess = np.ones(n_leds)
+
     if case == 'underdetermined':
         mode_used = mode
         if mode == 'balanced':
-            W = compute_balanced_weights(A)          # (n_leds,)
+            W = compute_balanced_weights(A)
+            l1_coeff = 0.0
         elif mode == 'sparse':
-            W = None                                 # handled via L1 term in objective
-        elif mode == 'maximize' and maximize_led in selected_LEDs:
-            W = np.zeros(n_leds)
-            idx = selected_LEDs.index(maximize_led)
-            W[idx] = -2.0                            # negative weight rewards high power on this LED
+            W = None
+            l1_coeff = np.mean(np.abs(target)) * 1e-3
         else:
             W = compute_balanced_weights(A)
+            l1_coeff = 0.0
             mode_used = 'balanced (fallback)'
     else:
         W = np.zeros(n_leds)
+        l1_coeff = 0.0
         mode_used = 'least-squares (LMS)'
-
-    bounds = [(0, max_vals.get(led)) for led in selected_LEDs]
-    initial_guess = np.array([
-        (max_vals.get(led) or 1.0) * 0.1 for led in selected_LEDs
-    ])
-
-    # L1 coefficient for sparse mode — strong enough to zero out unnecessary LEDs
-    l1_coeff = np.mean(np.abs(target)) * 1e-3 if mode == 'sparse' else 0.0
 
     def objective(P):
         residual = np.linalg.norm(A @ P - target) ** 2
-        if W is not None:
-            regularisation = np.linalg.norm(W * P) ** 2
-        else:
-            regularisation = 0.0
+        regularisation = np.linalg.norm(W * P) ** 2 if W is not None else 0.0
         sparsity = l1_coeff * np.sum(np.abs(P))
         return residual + regularisation + sparsity
 
     result = scipy.optimize.minimize(
-        objective,
-        initial_guess,
-        bounds=bounds,
-        method='L-BFGS-B',
+        objective, initial_guess, bounds=bounds, method='L-BFGS-B',
         options={'maxiter': 10000, 'ftol': 1e-12, 'gtol': 1e-8}
     )
 
@@ -1863,22 +1894,29 @@ def interactive_iso_target_slider(
         ttk.Checkbutton(led_inner, text=led, variable=led_active[led],
                         command=lambda: _schedule_update()).pack(side="left", padx=(0, 6))
 
-    # --- LED power display ---
+    # --- LED power display (max 4 LEDs per row) ---
+    LEDS_PER_ROW = 4
     power_frame = ttk.Frame(root)
     power_frame.grid(row=len(selected_opsins) + 3, column=0, sticky="ew", padx=12, pady=(0, 4))
-    power_inner = ttk.Frame(power_frame)
-    power_inner.pack(anchor="center")
-    ttk.Label(power_inner, text="Power:", font=(FONT, 9, "bold")).pack(side="left", padx=(0, 8))
     led_power_labels = {}
-    for led in selected_LEDs:
-        cell = ttk.Frame(power_inner)
-        cell.pack(side="left", padx=(0, 10))
-        tk.Label(cell, text=led, font=(FONT, 9, "bold"),
-                 fg=hex_colors[led]).pack(side="left", padx=(0, 2))
-        lbl = tk.Label(cell, text="—", font=(FONT, 9), fg="gray")
-        lbl.pack(side="left")
-        ttk.Label(cell, text="µW/cm²", font=(FONT, 8), foreground="gray").pack(side="left")
-        led_power_labels[led] = lbl
+    n_rows = (len(selected_LEDs) + LEDS_PER_ROW - 1) // LEDS_PER_ROW
+    for row_i in range(n_rows):
+        row_frame = ttk.Frame(power_frame)
+        row_frame.pack(anchor="center", fill="x")
+        row_leds = selected_LEDs[row_i * LEDS_PER_ROW:(row_i + 1) * LEDS_PER_ROW]
+        if row_i == 0:
+            ttk.Label(row_frame, text="Power:", font=(FONT, 9, "bold")).pack(side="left", padx=(0, 8))
+        else:
+            ttk.Label(row_frame, text="", font=(FONT, 9, "bold")).pack(side="left", padx=(0, 8))
+        for led in row_leds:
+            cell = ttk.Frame(row_frame)
+            cell.pack(side="left", padx=(0, 10))
+            tk.Label(cell, text=led, font=(FONT, 9, "bold"),
+                     fg=hex_colors[led]).pack(side="left", padx=(0, 2))
+            lbl = tk.Label(cell, text="—", font=(FONT, 9), fg="gray")
+            lbl.pack(side="left")
+            ttk.Label(cell, text="µW/cm²", font=(FONT, 8), foreground="gray").pack(side="left")
+            led_power_labels[led] = lbl
 
     # --- Matplotlib figure ---
     fig, (ax_bar, ax_spec) = plt.subplots(
@@ -2085,7 +2123,7 @@ def interactive_iso_target_slider(
 
     canvas.get_tk_widget().bind("<Configure>", _schedule_resize)
 
-    _do_update()
+    _schedule_update()
     root.mainloop()
 
 
