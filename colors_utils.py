@@ -1443,6 +1443,634 @@ def get_mix_color(isomerisation_target,
         P=None
     return P
 
+def solve_isomerisation_target(
+    isomerisation_target,
+    selected_LEDs=None,
+    mode='balanced',
+    maximize_led=None,
+    max_vals=None,
+    opsinDATA_path="./PhotoReceptorData.pkl",
+    ledDATA_path="./IlluminationData.pkl",
+    acDATA=None,
+    x_axis="x_axis",
+):
+    """
+    Inverse solver: given target isomerization rates per opsin, find LED power mix.
+
+    Parameters:
+        isomerisation_target (dict): {opsin_name: target R*/s}
+        selected_LEDs (list): LEDs to include in the solve.
+        mode (str): 'balanced' | 'sparse' | 'maximize' (only meaningful when n_leds > n_opsins).
+        maximize_led (str): LED name to maximise when mode='maximize'.
+        max_vals (dict): {led: max power µW/cm²}. None = unconstrained.
+        opsinDATA_path, ledDATA_path, acDATA, x_axis: passed to get_isomerisation_matrix.
+
+    Returns:
+        dict with keys:
+            'P'           — ndarray (n_leds,) solved LED powers (µW/cm²)
+            'iso_achieved'— ndarray (n_opsins,) resulting isomerization
+            'error'       — float residual ‖A@P - target‖
+            'case'        — str: 'underdetermined' | 'square' | 'overdetermined'
+            'mode_used'   — str: mode actually applied
+    """
+    import scipy.optimize
+
+    selected_opsins = list(isomerisation_target.keys())
+    if selected_LEDs is None:
+        selected_LEDs = ['Violet', 'Blue', 'Green', 'Yellow', 'Red']
+    if acDATA is None:
+        acDATA = {"Scones": 0.2, "Mcones": 0.2, "RedOpsin": 0.002, "Rods": 0.5, "Mela": 0.2}
+    if max_vals is None:
+        max_vals = {led: None for led in selected_LEDs}
+
+    n_leds = len(selected_LEDs)
+    n_ops = len(selected_opsins)
+    target = np.array([isomerisation_target[op] for op in selected_opsins], dtype=float)
+
+    A = get_isomerisation_matrix(
+        selected_opsins, selected_LEDs,
+        opsinDATA_path=opsinDATA_path, ledDATA_path=ledDATA_path,
+        acDATA=acDATA, x_axis=x_axis
+    )
+
+    # Detect case
+    rank = np.linalg.matrix_rank(A)
+    if n_leds > n_ops:
+        case = 'underdetermined'
+    elif n_leds == n_ops:
+        case = 'square' if rank == n_ops else 'overdetermined'
+    else:
+        case = 'overdetermined'
+
+    # Build weights based on mode (only meaningful for underdetermined)
+    if case == 'underdetermined':
+        mode_used = mode
+        if mode == 'balanced':
+            W = compute_balanced_weights(A)          # (n_leds,)
+        elif mode == 'sparse':
+            W = None                                 # handled via L1 term in objective
+        elif mode == 'maximize' and maximize_led in selected_LEDs:
+            W = np.zeros(n_leds)
+            idx = selected_LEDs.index(maximize_led)
+            W[idx] = -2.0                            # negative weight rewards high power on this LED
+        else:
+            W = compute_balanced_weights(A)
+            mode_used = 'balanced (fallback)'
+    else:
+        W = np.zeros(n_leds)
+        mode_used = 'least-squares (LMS)'
+
+    bounds = [(0, max_vals.get(led)) for led in selected_LEDs]
+    initial_guess = np.array([
+        (max_vals.get(led) or 1.0) * 0.1 for led in selected_LEDs
+    ])
+
+    # L1 coefficient for sparse mode — strong enough to zero out unnecessary LEDs
+    l1_coeff = np.mean(np.abs(target)) * 1e-3 if mode == 'sparse' else 0.0
+
+    def objective(P):
+        residual = np.linalg.norm(A @ P - target) ** 2
+        if W is not None:
+            regularisation = np.linalg.norm(W * P) ** 2
+        else:
+            regularisation = 0.0
+        sparsity = l1_coeff * np.sum(np.abs(P))
+        return residual + regularisation + sparsity
+
+    result = scipy.optimize.minimize(
+        objective,
+        initial_guess,
+        bounds=bounds,
+        method='L-BFGS-B',
+        options={'maxiter': 10000, 'ftol': 1e-12, 'gtol': 1e-8}
+    )
+
+    P = result.x
+    iso_achieved = A @ P
+    error = float(np.linalg.norm(iso_achieved - target))
+
+    return {
+        'P': P,
+        'iso_achieved': iso_achieved,
+        'error': error,
+        'case': case,
+        'mode_used': mode_used,
+    }
+
+
+def interactive_iso_target_slider(
+    selected_LEDs=None,
+    selected_opsins=None,
+    opsinDATA_path="./PhotoReceptorData.pkl",
+    ledDATA_path="./IlluminationData.pkl",
+    x_axis="x_axis",
+    acDATA=None,
+    max_vals=None,
+    max_iso=None,
+    def_iso=None,
+    colors=None,
+    FONT="Arial"
+):
+    """
+    GUI: enter target isomerization per opsin → solve for LED power mix.
+    Inverse of interactive_Ptot_slider_v2.
+    """
+    if selected_LEDs is None:
+        selected_LEDs = ['Violet', 'Blue', 'Green', 'Yellow', 'Red']
+    if selected_opsins is None:
+        selected_opsins = ["Scones", "Mela", "Rods", "Mcones", "RedOpsin"]
+    if acDATA is None:
+        acDATA = {"Scones": 0.2, "Mcones": 0.2, "RedOpsin": 0.002, "Rods": 0.5, "Mela": 0.2}
+    if max_vals is None:
+        max_vals = {led: 20 for led in selected_LEDs}
+    if max_iso is None:
+        max_iso = {op: 10000 for op in selected_opsins}
+    if def_iso is None:
+        def_iso = {op: 0 for op in selected_opsins}
+    if colors is None:
+        colors = {}
+
+    for opsin in selected_opsins:
+        if opsin not in acDATA:
+            acDATA[opsin] = 0.2
+
+    ledSpec = ledSpectrums(path=ledDATA_path, plot=False)
+    wl = ledSpec[x_axis]
+
+    for led in selected_LEDs:
+        if led not in max_vals:
+            max_vals[led] = 20
+        if led not in colors:
+            colors[led] = get_led_color(ledSpec[led], wl)
+
+    opsinSpec = prSpectrums(plot=False)
+    opsin_colors = {"Scones": "royalblue", "Mcones": "limegreen", "RedOpsin": "tomato",
+                    "Rods": "dimgray", "Mela": "mediumpurple"}
+
+    # --- GUI ---
+    root = tk.Tk()
+    root.title("Isomerization Target Solver")
+    root.resizable(True, True)
+    root.minsize(600, 500)
+    root.maxsize(root.winfo_screenwidth(), root.winfo_screenheight())
+    root.geometry("600x800")
+    try:
+        photo = tk.PhotoImage(file="isomerisation_icon.png")
+        root.wm_iconphoto(False, photo)
+    except Exception:
+        pass
+
+    iso_values = [tk.DoubleVar(value=float(def_iso[op])) for op in selected_opsins]
+    iso_override = [None] * len(selected_opsins)
+    opsin_active = [tk.BooleanVar(value=True) for _ in selected_opsins]
+    led_active = {led: tk.BooleanVar(value=True) for led in selected_LEDs}
+    solve_mode = tk.StringVar(value='balanced')
+    maximize_led_var = tk.StringVar(value=selected_LEDs[0])
+    value_entries = {}
+    _pending_update = [None]
+
+    def to_hex(c):
+        if isinstance(c, tuple):
+            return "#{:02X}{:02X}{:02X}".format(int(c[0]*255), int(c[1]*255), int(c[2]*255))
+        return c
+    hex_colors = {led: to_hex(colors[led]) for led in selected_LEDs}
+
+    # --- Root grid ---
+    n_fixed_rows = len(selected_opsins) + 5  # opsin rows + buttons + mode + LED selector + power display
+    for r in range(n_fixed_rows):
+        root.grid_rowconfigure(r, weight=0)
+    root.grid_rowconfigure(n_fixed_rows, weight=1)
+    root.grid_columnconfigure(0, weight=1)
+
+    # --- Opsin target sliders ---
+    slider_frame = ttk.Frame(root)
+    slider_frame.grid(row=0, rowspan=len(selected_opsins), column=0, sticky="ew", padx=12, pady=(10, 4))
+    slider_frame.columnconfigure(1, weight=1)
+
+    for i, op in enumerate(selected_opsins):
+        c = opsin_colors.get(op, "gray")
+        tk.Label(slider_frame, text=op, font=(FONT, 12, "bold"),
+                 fg=c, width=10, anchor="e").grid(row=i, column=0, padx=(0, 6), pady=2)
+
+        slider = ttk.Scale(slider_frame, from_=0, to=max_iso[op],
+                           orient="horizontal", variable=iso_values[i])
+        slider.grid(row=i, column=1, sticky="ew", pady=2)
+
+        entry_frame = ttk.Frame(slider_frame)
+        entry_frame.grid(row=i, column=2, padx=(6, 0), pady=2)
+        value_entry = ttk.Entry(entry_frame, font=(FONT, 10), width=9)
+        value_entry.insert(0, f"{def_iso[op]:.0f}")
+        value_entry.pack(side="left")
+        ttk.Label(entry_frame, text=" R*/s", font=(FONT, 10)).pack(side="left")
+        value_entries[op] = value_entry
+
+        chk = ttk.Checkbutton(slider_frame, variable=opsin_active[i],
+                               command=lambda: _schedule_update())
+        chk.grid(row=i, column=3, padx=(8, 4), pady=2)
+
+        def _make_slider_cmd(idx, entry):
+            def cmd(val):
+                iso_override[idx] = None
+                entry.delete(0, tk.END)
+                entry.insert(0, f"{iso_values[idx].get():.0f}")
+                _schedule_update()
+            return cmd
+
+        def _make_entry_binds(idx, entry, op=op):
+            def on_change(event=None):
+                try:
+                    v = float(entry.get())
+                    if v < 0:
+                        return
+                    cap = max_iso[op]
+                    if v > cap:
+                        iso_values[idx].set(cap)
+                        iso_override[idx] = v
+                    else:
+                        iso_values[idx].set(v)
+                        iso_override[idx] = None
+                    _schedule_update()
+                except ValueError:
+                    pass
+            entry.bind("<Return>", on_change)
+            entry.bind("<FocusOut>", on_change)
+
+        slider.config(command=_make_slider_cmd(i, value_entry))
+        _make_entry_binds(i, value_entry)
+
+    # --- Mode selector ---
+    mode_frame = ttk.Frame(root)
+    mode_frame.grid(row=len(selected_opsins), column=0, sticky="ew", padx=12, pady=(4, 2))
+    mode_inner = ttk.Frame(mode_frame)
+    mode_inner.pack(anchor="center")
+    ttk.Label(mode_inner, text="Mode:", font=(FONT, 10, "bold")).pack(side="left", padx=(0, 4))
+    ttk.Button(mode_inner, text="?", width=2, command=lambda: show_mode_help()).pack(side="left", padx=(0, 8))
+    for val, label in [('balanced', 'Balanced'), ('sparse', 'Sparse'), ('maximize', 'Maximize LED')]:
+        ttk.Radiobutton(mode_inner, text=label, variable=solve_mode, value=val,
+                        command=lambda: _schedule_update()).pack(side="left", padx=4)
+    maximize_combo = ttk.Combobox(mode_inner, textvariable=maximize_led_var,
+                                  values=selected_LEDs, width=10, state="readonly")
+    maximize_combo.pack(side="left", padx=(8, 0))
+    maximize_combo.bind("<<ComboboxSelected>>", lambda e: _schedule_update())
+
+    case_label = ttk.Label(mode_inner, text="", font=(FONT, 9), foreground="gray")
+    case_label.pack(side="left", padx=(12, 0))
+
+    def show_mode_help():
+        win = tk.Toplevel(root)
+        win.title("Solver modes — help")
+        win.resizable(False, False)
+        win.grab_set()  # modal
+        msg = (
+            "BALANCED\n"
+            "Distributes power across all active LEDs as evenly as possible.\n"
+            "No single LED dominates. Good general-purpose starting point.\n"
+            "\n"
+            "SPARSE\n"
+            "Prefers solutions that use as few LEDs as possible.\n"
+            "Most LEDs will be driven to zero; only the most efficient ones\n"
+            "for your target will be used. Useful for minimal stimuli.\n"
+            "\n"
+            "MAXIMIZE LED\n"
+            "Pushes the selected LED to its maximum power, then uses the\n"
+            "remaining LEDs to compensate and match the target as closely\n"
+            "as possible. Useful when you want to saturate a specific channel.\n"
+            "\n"
+            "SYSTEM CASE (shown in grey)\n"
+            "  • Underdetermined  — more LEDs than opsins: infinite exact solutions exist.\n"
+            "    The mode above selects among them.\n"
+            "  • Square  — same number: one unique solution (if the matrix is full rank).\n"
+            "  • Overdetermined  — fewer LEDs than opsins: no exact solution.\n"
+            "    The solver minimises the least-squares error regardless of mode.\n"
+            "\n"
+            "The residual error (err=…) shows how far the achieved\n"
+            "isomerization is from the target (in R*/s). Zero is perfect."
+        )
+        tk.Label(win, text=msg, justify="left", font=(FONT, 10),
+                 padx=16, pady=12).pack()
+        ttk.Button(win, text="Close", command=win.destroy).pack(pady=(0, 10))
+
+    # --- Buttons ---
+    btn_frame = ttk.Frame(root)
+    btn_frame.grid(row=len(selected_opsins) + 1, column=0, sticky="ew", padx=12, pady=(2, 6))
+
+    def reset_values(event=None):
+        for i, op in enumerate(selected_opsins):
+            iso_values[i].set(def_iso[op])
+            iso_override[i] = None
+            opsin_active[i].set(True)
+            value_entries[op].delete(0, tk.END)
+            value_entries[op].insert(0, f"{def_iso[op]:.0f}")
+        _schedule_update()
+
+    def _get_current_result():
+        active_opsins = [selected_opsins[i] for i in range(len(selected_opsins)) if opsin_active[i].get()]
+        active_leds = [led for led in selected_LEDs if led_active[led].get()]
+        target = {
+            op: (iso_override[i] if iso_override[i] is not None else iso_values[i].get())
+            for i, op in enumerate(selected_opsins) if opsin_active[i].get()
+        }
+        if not active_opsins or not active_leds:
+            return None
+        return solve_isomerisation_target(
+            isomerisation_target=target,
+            selected_LEDs=active_leds,
+            mode=solve_mode.get(),
+            maximize_led=maximize_led_var.get(),
+            max_vals={led: max_vals[led] for led in active_leds},
+            opsinDATA_path=opsinDATA_path,
+            ledDATA_path=ledDATA_path,
+            acDATA=acDATA,
+            x_axis=x_axis,
+        )
+
+    def _get_values_text():
+        result = _get_current_result()
+        if result is None:
+            return "No active opsins or LEDs."
+        active_leds = [led for led in selected_LEDs if led_active[led].get()]
+        active_opsins = [selected_opsins[i] for i in range(len(selected_opsins)) if opsin_active[i].get()]
+        lines = [f"Case: {result['case']}  |  Mode: {result['mode_used']}  |  Residual error: {result['error']:.2f} R*/s"]
+        lines.append("\nSolved LED Powers (µW/cm²):")
+        for i, led in enumerate(active_leds):
+            lines.append(f"  {led}: {result['P'][i]:.3f}")
+        lines.append("\nIsomerization — Target vs Achieved (R*/s):")
+        for i, op in enumerate(active_opsins):
+            tgt = (iso_override[selected_opsins.index(op)] if iso_override[selected_opsins.index(op)] is not None
+                   else iso_values[selected_opsins.index(op)].get())
+            lines.append(f"  {op}: target={tgt:.0f}  achieved={result['iso_achieved'][i]:.0f}")
+        return "\n".join(lines)
+
+    def print_values():
+        print(_get_values_text())
+
+    def copy_to_clipboard():
+        text = _get_values_text()
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update()
+
+    def save_plots():
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(
+            title="Save plots",
+            defaultextension=".png",
+            filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg"), ("All files", "*.*")]
+        )
+        if path:
+            fig.savefig(path, dpi=150, bbox_inches="tight")
+            print(f"Plots saved to: {path}")
+
+    def on_close():
+        plt.close(fig)
+        root.destroy()
+
+    btn_inner = ttk.Frame(btn_frame)
+    btn_inner.pack(anchor="center")
+    ttk.Button(btn_inner, text="Reset (Space)", command=reset_values).pack(side="left", padx=5)
+    ttk.Button(btn_inner, text="Print values", command=print_values).pack(side="left", padx=5)
+    ttk.Button(btn_inner, text="Copy to clipboard", command=copy_to_clipboard).pack(side="left", padx=5)
+    ttk.Button(btn_inner, text="Save plots", command=save_plots).pack(side="left", padx=5)
+    ttk.Button(btn_inner, text="Close", command=on_close).pack(side="left", padx=5)
+    root.bind("<space>", reset_values)
+    root.protocol("WM_DELETE_WINDOW", on_close)
+
+    # --- LED selector (centered, above plot) ---
+    led_sel_frame = ttk.Frame(root)
+    led_sel_frame.grid(row=len(selected_opsins) + 2, column=0, sticky="ew", padx=12, pady=(0, 2))
+    led_inner = ttk.Frame(led_sel_frame)
+    led_inner.pack(anchor="center")
+    ttk.Label(led_inner, text="LEDs:", font=(FONT, 10, "bold")).pack(side="left", padx=(0, 8))
+    for led in selected_LEDs:
+        ttk.Checkbutton(led_inner, text=led, variable=led_active[led],
+                        command=lambda: _schedule_update()).pack(side="left", padx=(0, 6))
+
+    # --- LED power display ---
+    power_frame = ttk.Frame(root)
+    power_frame.grid(row=len(selected_opsins) + 3, column=0, sticky="ew", padx=12, pady=(0, 4))
+    power_inner = ttk.Frame(power_frame)
+    power_inner.pack(anchor="center")
+    ttk.Label(power_inner, text="Power:", font=(FONT, 9, "bold")).pack(side="left", padx=(0, 8))
+    led_power_labels = {}
+    for led in selected_LEDs:
+        cell = ttk.Frame(power_inner)
+        cell.pack(side="left", padx=(0, 10))
+        tk.Label(cell, text=led, font=(FONT, 9, "bold"),
+                 fg=hex_colors[led]).pack(side="left", padx=(0, 2))
+        lbl = tk.Label(cell, text="—", font=(FONT, 9), fg="gray")
+        lbl.pack(side="left")
+        ttk.Label(cell, text="µW/cm²", font=(FONT, 8), foreground="gray").pack(side="left")
+        led_power_labels[led] = lbl
+
+    # --- Matplotlib figure ---
+    fig, (ax_bar, ax_spec) = plt.subplots(
+        2, 1, figsize=(8, 6),
+        gridspec_kw={"height_ratios": [1.2, 1]}
+    )
+    fig.patch.set_facecolor("#f8f8f8")
+
+    canvas = FigureCanvasTkAgg(fig, master=root)
+    canvas.get_tk_widget().grid(row=n_fixed_rows, column=0, sticky="nsew", padx=8, pady=(0, 8))
+
+    ax_bar.set_ylabel("Isomerization (R*/s)", fontsize=9)
+    ax_bar.set_title("Opsin Isomerization — Target vs Achieved", fontsize=10, fontweight="bold")
+    ax_bar.set_facecolor("#fdfdfd")
+
+    # Spectra panel — static opsin curves
+    opsin_lines = {}
+    opsin_wl = opsinSpec[x_axis]
+    for op in selected_opsins:
+        if op in opsinSpec:
+            s = opsinSpec[op]
+            s_norm = s / s.max()
+            line, = ax_spec.plot(opsin_wl, s_norm, color=opsin_colors.get(op, "gray"),
+                                 lw=1.5, linestyle="--", alpha=0.85, label=op)
+            opsin_lines[op] = line
+
+    # LED fills — pre-built, alpha updated
+    led_fills = {}
+    for led in selected_LEDs:
+        s = ledSpec[led]
+        s_norm = np.clip(s / s.max(), 0, None)
+        fill = ax_spec.fill_between(wl, s_norm, alpha=0.0, color=colors[led])
+        led_fills[led] = (fill, s_norm)
+
+    ax_spec.set_xlabel("Wavelength (nm)", fontsize=9)
+    ax_spec.set_ylabel("Normalized intensity", fontsize=9)
+    ax_spec.set_title("Spectra — Opsins (dashed) & LEDs (fill α ∝ power)", fontsize=10, fontweight="bold")
+    ax_spec.set_facecolor("#fdfdfd")
+
+    # Figure-level legends
+    from matplotlib.patches import Patch
+    led_legend_handles = [Patch(color=colors[led], label=led) for led in selected_LEDs]
+    _leg_spec = fig.legend(
+        handles=led_legend_handles,
+        title="LEDs", title_fontsize=8,
+        fontsize=8, loc="center right",
+        bbox_to_anchor=(1.0, 0.25),
+        framealpha=0.9, edgecolor="#cccccc"
+    )
+    _leg_bar = [None]
+    fig.tight_layout(pad=2.5)
+    fig.subplots_adjust(right=0.78)
+
+    def _do_update():
+        active_opsins = [selected_opsins[i] for i in range(len(selected_opsins)) if opsin_active[i].get()]
+        active_leds = [led for led in selected_LEDs if led_active[led].get()]
+
+        if not active_opsins or not active_leds:
+            ax_bar.cla()
+            ax_bar.set_facecolor("#fdfdfd")
+            case_label.config(text="")
+            for lbl in led_power_labels.values():
+                lbl.config(text="—", fg="gray")
+            canvas.draw_idle()
+            _pending_update[0] = None
+            return
+
+        target_dict = {
+            op: (iso_override[selected_opsins.index(op)]
+                 if iso_override[selected_opsins.index(op)] is not None
+                 else iso_values[selected_opsins.index(op)].get())
+            for op in active_opsins
+        }
+
+        result = solve_isomerisation_target(
+            isomerisation_target=target_dict,
+            selected_LEDs=active_leds,
+            mode=solve_mode.get(),
+            maximize_led=maximize_led_var.get(),
+            max_vals={led: max_vals[led] for led in active_leds},
+            opsinDATA_path=opsinDATA_path,
+            ledDATA_path=ledDATA_path,
+            acDATA=acDATA,
+            x_axis=x_axis,
+        )
+
+        # Update case label and mode availability
+        n_act_leds = len(active_leds)
+        n_act_ops = len(active_opsins)
+        case_label.config(text=f"[{result['case']}]  err={result['error']:.1f}")
+
+        # --- Bar chart: stacked LED contributions + target line ---
+        ax_bar.cla()
+        ax_bar.set_ylabel("Isomerization (R*/s)", fontsize=9)
+        ax_bar.set_title("Opsin Isomerization — Target vs Achieved", fontsize=10, fontweight="bold")
+        ax_bar.set_facecolor("#fdfdfd")
+
+        # Full isomerisation matrix for active opsins/leds to split contributions
+        iso_matrix_full = get_isomerisation_matrix(
+            active_opsins, active_leds,
+            opsinDATA_path=opsinDATA_path, ledDATA_path=ledDATA_path,
+            acDATA=acDATA, x_axis=x_axis
+        ) * result['P']  # (n_ops, n_leds) * (n_leds,) → contribution per LED
+
+        x_pos = np.arange(n_act_ops)
+        bottoms = np.zeros(n_act_ops)
+        for j, led in enumerate(active_leds):
+            vals = iso_matrix_full[:, j]
+            ax_bar.bar(x_pos, vals, 0.6, bottom=bottoms,
+                       label=led, color=colors[led], edgecolor="white", linewidth=0.5)
+            bottoms += vals
+
+        # Target dashed lines
+        for k, op in enumerate(active_opsins):
+            tgt = target_dict[op]
+            ax_bar.plot([k - 0.35, k + 0.35], [tgt, tgt],
+                        color="black", linewidth=2, linestyle="--", zorder=5)
+
+        totals = result['iso_achieved']
+        ymax = max(totals.max(), max(target_dict.values())) if target_dict else 1
+        ymax = ymax * 1.25 if ymax > 0 else 1
+        ax_bar.set_ylim(0, ymax)
+        for k, op in enumerate(active_opsins):
+            ax_bar.text(k, totals[k] + ymax * 0.01, f"{int(totals[k])}",
+                        ha="center", va="bottom", fontsize=8, fontweight="bold")
+        ax_bar.set_xticks(x_pos)
+        ax_bar.set_xticklabels(active_opsins, fontsize=9)
+
+        # Rebuild opsin legend
+        if _leg_bar[0] is not None:
+            _leg_bar[0].remove()
+        opsin_handles = [
+            plt.Line2D([0], [0], color=opsin_colors.get(op, "gray"),
+                       lw=1.5, linestyle="--", label=op)
+            for op in selected_opsins if opsin_active[selected_opsins.index(op)].get()
+        ]
+        if opsin_handles:
+            _leg_bar[0] = fig.legend(
+                handles=opsin_handles,
+                title="Opsins", title_fontsize=8,
+                fontsize=8, loc="center right",
+                bbox_to_anchor=(1.0, 0.72),
+                framealpha=0.9, edgecolor="#cccccc"
+            )
+        else:
+            _leg_bar[0] = None
+
+        # --- Spectra panel ---
+        for op, line in opsin_lines.items():
+            line.set_visible(opsin_active[selected_opsins.index(op)].get())
+
+        P_full = np.zeros(len(selected_LEDs))
+        for j, led in enumerate(active_leds):
+            P_full[selected_LEDs.index(led)] = result['P'][j]
+
+        p_max = P_full.max() if P_full.max() > 0 else 1
+        for i, led in enumerate(selected_LEDs):
+            fill, _ = led_fills[led]
+            if led_active[led].get():
+                alpha = float(np.clip(P_full[i] / p_max, 0.05, 0.75))
+            else:
+                alpha = 0.0
+            fill.set_alpha(alpha)
+
+        # Update LED power labels
+        for led in selected_LEDs:
+            p = P_full[selected_LEDs.index(led)]
+            if led_active[led].get():
+                led_power_labels[led].config(text=f"{p:.3f}", fg="black")
+            else:
+                led_power_labels[led].config(text="—", fg="gray")
+
+        canvas.draw_idle()
+        _pending_update[0] = None
+
+    def _schedule_update():
+        # Keep maximize combobox in sync with active LEDs
+        active_leds = [led for led in selected_LEDs if led_active[led].get()]
+        maximize_combo.config(values=active_leds)
+        if maximize_led_var.get() not in active_leds and active_leds:
+            maximize_led_var.set(active_leds[0])
+        if _pending_update[0] is not None:
+            root.after_cancel(_pending_update[0])
+        _pending_update[0] = root.after(15, _do_update)
+
+    _pending_resize = [None]
+
+    def _schedule_resize(event):
+        w_px, h_px = event.width, event.height
+        if w_px < 10 or h_px < 10:
+            return
+        if _pending_resize[0] is not None:
+            root.after_cancel(_pending_resize[0])
+        def _do_resize():
+            tk_w = canvas.get_tk_widget().winfo_width()
+            tk_h = canvas.get_tk_widget().winfo_height()
+            if tk_w < 10 or tk_h < 10:
+                return
+            fig.set_size_inches(tk_w / fig.dpi, tk_h / fig.dpi, forward=False)
+            fig.subplots_adjust(right=0.78)
+            canvas.draw_idle()
+            _pending_resize[0] = None
+        _pending_resize[0] = root.after(80, _do_resize)
+
+    canvas.get_tk_widget().bind("<Configure>", _schedule_resize)
+
+    _do_update()
+    root.mainloop()
+
+
 def get_list_from_vec(file_path, col_index=2):
     """
     Reads a .vec file and extracts a specified column into two lists:
