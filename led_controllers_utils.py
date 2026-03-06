@@ -1,7 +1,7 @@
 import openpyxl as pxl
 import numpy as np
 import matplotlib.pyplot as plt
-from  colors_utils import *
+from colors_utils import ledSpectrums
 from tqdm import trange
 import pickle
 import os
@@ -226,48 +226,28 @@ def charge_calibration(path_excel, correction, path_spectra= './IlluminationData
     return results
 
 
-def get_voltages(Ptot, calibration, selected_LEDs = ['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=False):
+def get_voltages(Ptot, calibration, selected_LEDs=['Violet', 'Blue', 'Green', 'Yellow', 'Red'], verbose=False):
 
     voltages = calibration['voltages']
     driving_tension = []
-    
-    for col_i in range(len(selected_LEDs)) :
-        col_name = selected_LEDs[col_i]
+
+    for col_i, col_name in enumerate(selected_LEDs):
         temp_P = float(Ptot[col_i])
-                        
-        # Return 0 voltage if the power is 0
+
         if temp_P == 0:
             driving_tension.append(0)
             if verbose:
                 print(f"{col_name}: Power is 0, so voltage is 0 V.")
             continue
 
-        
         calibration_list = calibration[col_name]
-        if temp_P>calibration_list[-1]:
+        if temp_P > calibration_list[-1]:
             raise ValueError('The given power value is too high. Try putting a lower value.')
-    
-        if temp_P in calibration_list :
-            index=np.where(calibration_list==temp_P)
-            res_voltage=voltages[index][0]
-        
-        else : 
-            low_ind=0
-            high_ind=len(calibration_list)-1
-            
-            for i in range(0,len(calibration_list)):
-                if calibration_list[i]<temp_P and calibration_list[i]>calibration_list[low_ind]:
-                    # print(calibration_list[i])
-                    low_ind=i
-                if calibration_list[i]>temp_P and calibration_list[i]<calibration_list[high_ind]:
-                    high_ind=i
-                #print(voltages[low_ind],voltages[high_ind])
-            
-            res_voltage = voltages[low_ind] + ( voltages[high_ind] - voltages[low_ind] ) * ( temp_P - calibration_list[low_ind] ) / ( calibration_list[high_ind] - calibration_list[low_ind] )
-            driving_tension.append(res_voltage)
-            
-            if verbose:
-                print('{}   :    {} V'.format(col_name, res_voltage) )
-            
-    driving_tension = np.array(driving_tension)
-    return driving_tension
+
+        res_voltage = np.interp(temp_P, calibration_list, voltages)
+        driving_tension.append(res_voltage)
+
+        if verbose:
+            print(f'{col_name}   :    {res_voltage} V')
+
+    return np.array(driving_tension)

@@ -15,4 +15,4 @@ def_val = {led:1 for led in leds_csv.keys()}
 max_vals = {led: 5000 if ('Red' in led or '600' in led or "595" in led) else 20 for led in leds_csv.keys()}
 
 if __name__ == '__main__':
-    interactive_Ptot_slider(selected_LEDs=selected_LEDs, def_vals=(def_val), max_vals = max_vals)
+    interactive_Ptot_slider_v2(selected_LEDs=selected_LEDs, def_vals=(def_val), max_vals = max_vals)

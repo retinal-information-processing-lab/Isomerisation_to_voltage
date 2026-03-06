@@ -2,6 +2,8 @@ import numpy as np
 import itertools
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import *
+import matplotlib
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pickle
 import os
 import io
@@ -13,8 +15,6 @@ import plotly.io as pio
 import scipy
 from tqdm.auto import tqdm
 from datetime import datetime, timezone, timedelta
-import matplotlib.pyplot as plt
-import openpyxl as pxl
 
 
 
@@ -268,10 +268,80 @@ def get_isomerisations(
 
     return isomerisation
 
-def get_led_color(spectrum, x_axis, cmap_name="nipy_spectral"):
-    cmap = matplotlib.colormaps[cmap_name]
-    norm_x = (x_axis - x_axis.min()) / (x_axis.max() - x_axis.min())
-    return tuple(np.round(np.average(np.array([cmap(n) for n in norm_x]), axis=0, weights=spectrum/spectrum.max())[:-1], decimals=3))
+def get_led_color(spectrum, x_axis):
+    """
+    Computes a perceptually correct RGB color from a spectrum using CIE 1931 color matching functions.
+    Works for narrow (monochromatic) and broad (white, IR-heavy) spectra.
+    Returns an (R, G, B) tuple with values in [0, 1].
+    """
+    # CIE 1931 2° color matching functions sampled at 5nm from 360 to 780nm
+    _cie_wl = np.arange(360, 781, 5)
+    _cie_x = np.array([
+        0.000130,0.000232,0.000415,0.000742,0.001368,0.002236,0.004243,0.007650,0.014310,0.023190,
+        0.043510,0.077630,0.134380,0.214770,0.283900,0.328500,0.348280,0.348060,0.336200,0.318700,
+        0.290800,0.251100,0.195360,0.142100,0.095640,0.057950,0.032010,0.014700,0.004900,0.002400,
+        0.009300,0.029100,0.063270,0.109600,0.165500,0.225750,0.290400,0.359700,0.433450,0.512050,
+        0.594500,0.678400,0.762100,0.842500,0.916300,0.978600,1.026300,1.056700,1.062200,1.045600,
+        1.002600,0.938400,0.854450,0.751400,0.642400,0.541900,0.447900,0.360800,0.283500,0.218700,
+        0.164900,0.121200,0.087400,0.063600,0.046770,0.032900,0.022700,0.015840,0.011359,0.008111,
+        0.005790,0.004109,0.002899,0.002049,0.001440,0.001000,0.000690,0.000476,0.000332,0.000235,
+        0.000166,0.000117,0.000083,0.000059,0.000042
+    ])
+    _cie_y = np.array([
+        0.000004,0.000007,0.000012,0.000022,0.000039,0.000064,0.000120,0.000217,0.000396,0.000640,
+        0.001210,0.002180,0.004000,0.007300,0.011600,0.016840,0.023000,0.029800,0.038000,0.048000,
+        0.060000,0.073900,0.090980,0.112600,0.139020,0.169300,0.208020,0.258600,0.323000,0.407300,
+        0.503000,0.608200,0.710000,0.793200,0.862000,0.914850,0.954000,0.980300,0.994950,1.000000,
+        0.995000,0.978600,0.952000,0.915400,0.870000,0.816300,0.757000,0.694900,0.631000,0.566800,
+        0.503000,0.441200,0.381000,0.321000,0.265000,0.217000,0.175000,0.138200,0.107000,0.081600,
+        0.061000,0.044580,0.032000,0.023200,0.017000,0.011920,0.008210,0.005723,0.004102,0.002929,
+        0.002091,0.001484,0.001047,0.000740,0.000520,0.000361,0.000249,0.000172,0.000120,0.000085,
+        0.000060,0.000042,0.000030,0.000021,0.000015
+    ])
+    _cie_z = np.array([
+        0.000606,0.001086,0.001946,0.003486,0.006450,0.010550,0.020050,0.036210,0.067850,0.110200,
+        0.207400,0.371300,0.645600,1.039050,1.385600,1.622960,1.747060,1.782600,1.772110,1.744100,
+        1.669200,1.528100,1.287640,1.041900,0.812950,0.616200,0.465180,0.353300,0.272000,0.212300,
+        0.158200,0.111700,0.078250,0.057250,0.042160,0.029840,0.020300,0.013400,0.008750,0.005750,
+        0.003900,0.002750,0.002100,0.001800,0.001650,0.001400,0.001100,0.001000,0.000800,0.000600,
+        0.000340,0.000240,0.000190,0.000100,0.000050,0.000030,0.000020,0.000010,0.000000,0.000000,
+        0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,
+        0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,
+        0.000000,0.000000,0.000000,0.000000,0.000000
+    ])
+
+    # Interpolate CMFs to the spectrum's x_axis
+    x_bar = np.interp(x_axis, _cie_wl, _cie_x, left=0, right=0)
+    y_bar = np.interp(x_axis, _cie_wl, _cie_y, left=0, right=0)
+    z_bar = np.interp(x_axis, _cie_wl, _cie_z, left=0, right=0)
+
+    spec = np.clip(spectrum, 0, None)
+    spec = spec / spec.max() if spec.max() > 0 else spec
+
+    X = np.trapz(spec * x_bar, x_axis)
+    Y = np.trapz(spec * y_bar, x_axis)
+    Z = np.trapz(spec * z_bar, x_axis)
+
+    # XYZ -> linear sRGB (D65 whitepoint matrix)
+    XYZ = np.array([X, Y, Z])
+    M = np.array([
+        [ 3.2406, -1.5372, -0.4986],
+        [-0.9689,  1.8758,  0.0415],
+        [ 0.0557, -0.2040,  1.0570]
+    ])
+    rgb_lin = M @ XYZ
+
+    # Bring out-of-gamut colors back into [0,1] by desaturating toward white
+    if rgb_lin.max() > 0:
+        rgb_lin /= rgb_lin.max()
+    rgb_lin = np.clip(rgb_lin, 0, 1)
+
+    # Gamma correction (sRGB)
+    rgb = np.where(rgb_lin <= 0.0031308,
+                   12.92 * rgb_lin,
+                   1.055 * np.power(rgb_lin, 1/2.4) - 0.055)
+
+    return tuple(float(c) for c in np.clip(rgb, 0, 1))
 
 
 def plot_isomerisations(
@@ -411,15 +481,15 @@ def plot_isomerisations(
 
 
 def interactive_Ptot_slider(
-    selected_LEDs=None, 
-    selected_opsins=None, 
-    opsinDATA_path="./PhotoReceptorData.pkl", 
+    selected_LEDs=None,
+    selected_opsins=None,
+    opsinDATA_path="./PhotoReceptorData.pkl",
     ledDATA_path="./IlluminationData.pkl",
     x_axis="x_axis",
     acDATA=None,
     max_vals=None,
     def_vals=None,
-    colors = None,
+    colors=None,
     FONT="Arial"
 ):
     
@@ -708,6 +778,387 @@ def interactive_Ptot_slider(
     root.mainloop()
 
     
+def interactive_Ptot_slider_v2(
+    selected_LEDs=None,
+    selected_opsins=None,
+    opsinDATA_path="./PhotoReceptorData.pkl",
+    ledDATA_path="./IlluminationData.pkl",
+    x_axis="x_axis",
+    acDATA=None,
+    max_vals=None,
+    def_vals=None,
+    colors=None,
+    FONT="Arial"
+):
+    # --- Defaults ---
+    if selected_LEDs is None:
+        selected_LEDs = ['Violet', 'Blue', 'Green', 'Yellow', 'Red']
+    if selected_opsins is None:
+        selected_opsins = ["Scones", "Mela", "Rods", "Mcones", "RedOpsin"]
+    if acDATA is None:
+        acDATA = {"Scones": 0.2, "Mcones": 0.2, "RedOpsin": 0.002, "Rods": 0.5, "Mela": 0.2}
+    if max_vals is None:
+        max_vals = {'Violet': 5, 'Blue': 5, 'Green': 5, 'Yellow': 5, 'Red': 500}
+    if def_vals is None:
+        def_vals = {'Violet': 1, 'Blue': 1, 'Green': 1, 'Yellow': 1, 'Red': 0}
+    if colors is None:
+        colors = {}
+
+    for opsin in selected_opsins:
+        if opsin not in acDATA:
+            acDATA[opsin] = 0.2
+            print(f"Opsin {opsin} not in acDATA, defaulting to 0.2")
+
+    ledSpec = ledSpectrums(path=ledDATA_path, plot=False)
+    wl = ledSpec[x_axis]
+
+    for led in selected_LEDs:
+        if led not in max_vals:
+            max_vals[led] = 20
+        if led not in def_vals:
+            def_vals[led] = 1
+        if led not in colors:
+            colors[led] = get_led_color(ledSpec[led], wl)
+
+    assert all(led in max_vals and led in def_vals and led in colors for led in selected_LEDs)
+    assert all(opsin in acDATA for opsin in selected_opsins)
+
+    opsinSpec = prSpectrums(plot=False)
+    opsin_colors = {"Scones": "royalblue", "Mcones": "limegreen", "RedOpsin": "tomato",
+                    "Rods": "dimgray", "Mela": "mediumpurple"}
+
+    isomerisation_matrix = get_isomerisation_matrix(
+        selected_opsins, selected_LEDs,
+        opsinDATA_path=opsinDATA_path, ledDATA_path=ledDATA_path,
+        acDATA=acDATA, x_axis=x_axis
+    )
+
+    # --- GUI ---
+    root = tk.Tk()
+    root.title("Interactive Ptot Slider")
+    root.resizable(True, True)
+    root.minsize(600, 500)
+    root.maxsize(root.winfo_screenwidth(), root.winfo_screenheight())
+    root.geometry("600x750")
+    try:
+        photo = tk.PhotoImage(file="isomerisation_icon.png")
+        root.wm_iconphoto(False, photo)
+    except Exception:
+        pass
+
+    Ptot_values = [tk.DoubleVar(value=float(def_vals[led])) for led in selected_LEDs]
+    Ptot_override = [None] * len(selected_LEDs)  # stores entry value when it exceeds slider range
+    led_active = [tk.BooleanVar(value=True) for _ in selected_LEDs]
+    opsin_active = {opsin: tk.BooleanVar(value=True) for opsin in selected_opsins}
+    value_entries = {}
+    slider_widgets = {}
+    _pending_update = [None]
+
+    # --- hex colors for tk labels ---
+    def to_hex(c):
+        if isinstance(c, tuple):
+            return "#{:02X}{:02X}{:02X}".format(int(c[0]*255), int(c[1]*255), int(c[2]*255))
+        return c
+    hex_colors = {led: to_hex(colors[led]) for led in selected_LEDs}
+
+    # --- Root grid: fixed rows for controls, expanding row for canvas ---
+    n_fixed_rows = len(selected_LEDs) + 3  # sliders + buttons + opsin selector
+    for r in range(n_fixed_rows):
+        root.grid_rowconfigure(r, weight=0)
+    root.grid_rowconfigure(n_fixed_rows, weight=1)   # canvas row expands
+    root.grid_columnconfigure(0, weight=1)
+
+    # --- Slider panel ---
+    slider_frame = ttk.Frame(root)
+    slider_frame.grid(row=0, rowspan=len(selected_LEDs), column=0, sticky="ew", padx=12, pady=(10, 4))
+    slider_frame.columnconfigure(1, weight=1)  # slider column expands
+
+    for i, led in enumerate(selected_LEDs):
+        tk.Label(slider_frame, text=led, font=(FONT, 12, "bold"),
+                 fg=hex_colors[led], width=10, anchor="e").grid(row=i, column=0, padx=(0, 6), pady=2)
+
+        slider = ttk.Scale(slider_frame, from_=0, to=max_vals[led],
+                           orient="horizontal", variable=Ptot_values[i])
+        slider.grid(row=i, column=1, sticky="ew", pady=2)
+        slider_widgets[led] = slider
+
+        entry_frame = ttk.Frame(slider_frame)
+        entry_frame.grid(row=i, column=2, padx=(6, 0), pady=2)
+        value_entry = ttk.Entry(entry_frame, font=(FONT, 10), width=9)
+        value_entry.insert(0, f"{def_vals[led]:.3f}")
+        value_entry.pack(side="left")
+        ttk.Label(entry_frame, text=" µW/cm²", font=(FONT, 10)).pack(side="left")
+        value_entries[led] = value_entry
+
+        chk = ttk.Checkbutton(slider_frame, variable=led_active[i],
+                              command=lambda: _schedule_update())
+        chk.grid(row=i, column=3, padx=(8, 4), pady=2)
+
+        def _make_slider_cmd(idx, entry):
+            def cmd(val):
+                Ptot_override[idx] = None
+                entry.delete(0, tk.END)
+                entry.insert(0, f"{Ptot_values[idx].get():.3f}")
+                _schedule_update()
+            return cmd
+
+        def _make_entry_binds(idx, entry):
+            def on_change(event=None):
+                try:
+                    v = float(entry.get())
+                    if v < 0:
+                        return
+                    cap = max_vals[selected_LEDs[idx]]
+                    if v > cap:
+                        Ptot_values[idx].set(cap)
+                        Ptot_override[idx] = v
+                    else:
+                        Ptot_values[idx].set(v)
+                        Ptot_override[idx] = None
+                    _schedule_update()
+                except ValueError:
+                    pass
+            entry.bind("<Return>", on_change)
+            entry.bind("<FocusOut>", on_change)
+
+        slider.config(command=_make_slider_cmd(i, value_entry))
+        _make_entry_binds(i, value_entry)
+
+    # --- Buttons ---
+    btn_frame = ttk.Frame(root)
+    btn_frame.grid(row=len(selected_LEDs), column=0, sticky="ew", padx=12, pady=(2, 6))
+
+    def reset_values(event=None):
+        for i, led in enumerate(selected_LEDs):
+            Ptot_values[i].set(def_vals[led])
+            Ptot_override[i] = None
+            led_active[i].set(True)
+            value_entries[led].delete(0, tk.END)
+            value_entries[led].insert(0, f"{def_vals[led]:.3f}")
+        _schedule_update()
+
+    def _get_values_text():
+        Ptot = np.array([
+            (Ptot_override[i] if Ptot_override[i] is not None else Ptot_values[i].get())
+            if led_active[i].get() else 0.0
+            for i in range(len(selected_LEDs))
+        ])
+        iso = isomerisation_matrix @ Ptot[:, None]
+        lines = ["LED Power Values (µW/cm²):"]
+        for i, led in enumerate(selected_LEDs):
+            if led_active[i].get():
+                lines.append(f"  {led}: {Ptot[i]:.3f}")
+        lines.append("\nOpsin Isomerization Values (R*/s):")
+        for i, opsin in enumerate(selected_opsins):
+            lines.append(f"  {opsin}: {int(iso[i, 0])}")
+        return "\n".join(lines)
+
+    def print_values():
+        print(_get_values_text())
+
+    def copy_to_clipboard():
+        text = _get_values_text()
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update()
+
+    def save_plots():
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(
+            title="Save plots",
+            defaultextension=".png",
+            filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg"), ("All files", "*.*")]
+        )
+        if path:
+            fig.savefig(path, dpi=150, bbox_inches="tight")
+            print(f"Plots saved to: {path}")
+
+    def on_close():
+        plt.close(fig)
+        root.destroy()
+
+    btn_inner = ttk.Frame(btn_frame)
+    btn_inner.pack(anchor="center")
+    ttk.Button(btn_inner, text="Reset (Space)", command=reset_values).pack(side="left", padx=5)
+    ttk.Button(btn_inner, text="Print values", command=print_values).pack(side="left", padx=5)
+    ttk.Button(btn_inner, text="Copy to clipboard", command=copy_to_clipboard).pack(side="left", padx=5)
+    ttk.Button(btn_inner, text="Save plots", command=save_plots).pack(side="left", padx=5)
+    ttk.Button(btn_inner, text="Close", command=on_close).pack(side="left", padx=5)
+    root.bind("<space>", reset_values)
+    root.protocol("WM_DELETE_WINDOW", on_close)
+
+    # --- Opsin selector (horizontal, above plot, centered) ---
+    opsin_sel_frame = ttk.Frame(root)
+    opsin_sel_frame.grid(row=len(selected_LEDs) + 1, column=0, sticky="ew", padx=12, pady=(0, 2))
+    opsin_inner = ttk.Frame(opsin_sel_frame)
+    opsin_inner.pack(anchor="center")
+    ttk.Label(opsin_inner, text="Opsins:", font=(FONT, 10, "bold")).pack(side="left", padx=(0, 8))
+    for opsin in selected_opsins:
+        ttk.Checkbutton(
+            opsin_inner, text=opsin,
+            variable=opsin_active[opsin],
+            command=lambda: _schedule_update()
+        ).pack(side="left", padx=(0, 6))
+
+    # --- Matplotlib figure ---
+    fig, (ax_bar, ax_spec) = plt.subplots(
+        2, 1, figsize=(8, 6),
+        gridspec_kw={"height_ratios": [1.2, 1]}
+    )
+    fig.patch.set_facecolor("#f8f8f8")
+
+    canvas = FigureCanvasTkAgg(fig, master=root)
+    canvas.get_tk_widget().grid(row=n_fixed_rows, column=0, sticky="nsew", padx=8, pady=(0, 8))
+
+    ax_bar.set_ylabel("Isomerization (R*/s)", fontsize=9)
+    ax_bar.set_title("Opsin Isomerization", fontsize=10, fontweight="bold")
+    ax_bar.set_facecolor("#fdfdfd")
+
+    # Spectra panel — static opsin curves (stored for visibility toggling)
+    opsin_lines = {}
+    opsin_wl = opsinSpec[x_axis]
+    for opsin in selected_opsins:
+        if opsin in opsinSpec:
+            s = opsinSpec[opsin]
+            s_norm = s / s.max()
+            line, = ax_spec.plot(opsin_wl, s_norm, color=opsin_colors.get(opsin, "gray"),
+                                 lw=1.5, linestyle="--", alpha=0.85, label=opsin)
+            opsin_lines[opsin] = line
+
+    # LED fills — pre-built, alpha updated via set_alpha (no rebuild)
+    led_fills = {}
+    for led in selected_LEDs:
+        s = ledSpec[led]
+        s_norm = np.clip(s / s.max(), 0, None)
+        fill = ax_spec.fill_between(wl, s_norm, alpha=0.0, color=colors[led])
+        led_fills[led] = (fill, s_norm)
+
+    ax_spec.set_xlabel("Wavelength (nm)", fontsize=9)
+    ax_spec.set_ylabel("Normalized intensity", fontsize=9)
+    ax_spec.set_title("Spectra — Opsins (dashed) & LEDs (fill α ∝ power)", fontsize=10, fontweight="bold")
+    ax_spec.set_facecolor("#fdfdfd")
+
+    # Build LED legend entries (filled patches) for the spectra panel — static
+    from matplotlib.patches import Patch
+    led_legend_handles = [Patch(color=colors[led], label=led) for led in selected_LEDs]
+
+    # Figure-level legends placed to the right of both axes
+    _leg_bar = [None]   # mutable container so _do_update can replace it
+    _leg_spec = fig.legend(
+        handles=led_legend_handles,
+        title="LEDs", title_fontsize=8,
+        fontsize=8, loc="center right",
+        bbox_to_anchor=(1.0, 0.25),
+        framealpha=0.9, edgecolor="#cccccc"
+    )
+    fig.tight_layout(pad=2.5)
+    fig.subplots_adjust(right=0.78)
+
+    def _do_update():
+        Ptot = np.array([
+            (Ptot_override[i] if Ptot_override[i] is not None else Ptot_values[i].get())
+            if led_active[i].get() else 0.0
+            for i in range(len(selected_LEDs))
+        ])
+        iso_matrix = isomerisation_matrix * Ptot  # (n_opsins, n_leds)
+
+        # --- Bar chart: rebuild with only active opsins ---
+        vis_opsins = [op for op in selected_opsins if opsin_active[op].get()]
+        vis_idx = [selected_opsins.index(op) for op in vis_opsins]
+        n_vis = len(vis_opsins)
+        x_vis = np.arange(n_vis)
+
+        ax_bar.cla()
+        ax_bar.set_ylabel("Isomerization (R*/s)", fontsize=9)
+        ax_bar.set_title("Opsin Isomerization", fontsize=10, fontweight="bold")
+        ax_bar.set_facecolor("#fdfdfd")
+
+        if n_vis > 0:
+            bottoms = np.zeros(n_vis)
+            for i, led in enumerate(selected_LEDs):
+                if not led_active[i].get():
+                    continue
+                vals = iso_matrix[vis_idx, i]
+                ax_bar.bar(x_vis, vals, 0.6, bottom=bottoms,
+                           label=led, color=colors[led], edgecolor="white", linewidth=0.5)
+                bottoms += vals
+
+            totals = iso_matrix[vis_idx, :].sum(axis=1)
+            ymax = totals.max() if totals.max() > 0 else 1
+            ax_bar.set_ylim(0, ymax * 1.18)
+            for j, (x, op) in enumerate(zip(x_vis, vis_opsins)):
+                ax_bar.text(x, totals[j] + ymax * 0.01, f"{int(totals[j])}",
+                            ha="center", va="bottom", fontsize=8, fontweight="bold")
+            ax_bar.set_xticks(x_vis)
+            ax_bar.set_xticklabels(vis_opsins, fontsize=9)
+
+        # Rebuild opsin figure legend (active opsins may have changed)
+        if _leg_bar[0] is not None:
+            _leg_bar[0].remove()
+        opsin_handles = [
+            plt.Line2D([0], [0], color=opsin_colors.get(op, "gray"),
+                       lw=1.5, linestyle="--", label=op)
+            for op in selected_opsins if opsin_active[op].get()
+        ]
+        if opsin_handles:
+            _leg_bar[0] = fig.legend(
+                handles=opsin_handles,
+                title="Opsins", title_fontsize=8,
+                fontsize=8, loc="center right",
+                bbox_to_anchor=(1.0, 0.72),
+                framealpha=0.9, edgecolor="#cccccc"
+            )
+        else:
+            _leg_bar[0] = None
+
+        # Update opsin line visibility in spectra panel
+        for opsin, line in opsin_lines.items():
+            line.set_visible(opsin_active[opsin].get())
+
+        # Update LED fill alphas via set_alpha — no rebuild
+        p_max = Ptot.max() if Ptot.max() > 0 else 1
+        for i, led in enumerate(selected_LEDs):
+            fill, _ = led_fills[led]
+            if led_active[i].get():
+                alpha = float(np.clip(Ptot[i] / p_max, 0.05, 0.75))
+            else:
+                alpha = 0.0
+            fill.set_alpha(alpha)
+
+        canvas.draw_idle()
+        _pending_update[0] = None
+
+    def _schedule_update():
+        if _pending_update[0] is not None:
+            root.after_cancel(_pending_update[0])
+        _pending_update[0] = root.after(15, _do_update)
+
+    _pending_resize = [None]
+
+    def _schedule_resize(event):
+        w_px, h_px = event.width, event.height
+        if w_px < 10 or h_px < 10:
+            return
+        if _pending_resize[0] is not None:
+            root.after_cancel(_pending_resize[0])
+        def _do_resize():
+            # Use the actual widget size at fire time (may differ from schedule time)
+            tk_w = canvas.get_tk_widget().winfo_width()
+            tk_h = canvas.get_tk_widget().winfo_height()
+            if tk_w < 10 or tk_h < 10:
+                return
+            fig.set_size_inches(tk_w / fig.dpi, tk_h / fig.dpi, forward=False)
+            fig.subplots_adjust(right=0.78)
+            canvas.draw_idle()
+            _pending_resize[0] = None
+        _pending_resize[0] = root.after(80, _do_resize)
+
+    canvas.get_tk_widget().bind("<Configure>", _schedule_resize)
+
+    _do_update()
+    root.mainloop()
+
+
 def solve_led_power_brut_force(matrix, target, high_bounds=None, low_bounds=None, initial_step=5, final_step=0.01):
     """
     Solve the LED power mix for given opsin isomerizations using a multi-step brute force approach.
